@@ -1,0 +1,95 @@
+/* CodeMirror host */
+.cm-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.cm-host .cm-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.cm-host .cm-editor.cm-focused {
+  outline: none;
+}
+.cm-host .cm-scroller {
+  font-family: inherit;
+  line-height: inherit;
+  padding: 20px 0 120px;
+}
+.cm-host .cm-content {
+  padding: 0 28px;
+  max-width: 820px;
+  caret-color: var(--accent);
+}
+.cm-host .cm-line {
+  padding: 0;
+}
+.cm-host .cm-cursor {
+  border-left-color: var(--accent);
+}
+.cm-host .cm-selectionBackground,
+.cm-host .cm-editor ::selection {
+  background: var(--selection) !important;
+}
+.cm-host .cm-activeLine {
+  background: transparent;
+}
+.cm-host .cm-editor.cm-focused .cm-activeLine {
+  background: var(--surface-2);
+}
+.cm-host .cm-gutters {
+  display: none;
+}
+.cm-host .cm-placeholder {
+  color: var(--text-3);
+  font-style: italic;
+}
+.cm-host .cm-editor .cm-matchingBracket {
+  background: var(--accent-soft);
+  outline: none;
+}
+/* markdown syntax colouring via classes from lib/editorTheme */
+.cm-md-heading {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--text);
+}
+.cm-md-heading1 {
+  font-size: 1.35em;
+}
+.cm-md-heading2 {
+  font-size: 1.18em;
+}
+.cm-md-emphasis {
+  font-style: italic;
+}
+.cm-md-strong {
+  font-weight: 600;
+}
+.cm-md-link,
+.cm-md-url {
+  color: var(--accent-text);
+}
+.cm-md-code {
+  color: var(--text-2);
+}
+.cm-md-meta {
+  color: var(--text-3);
+}
+.cm-md-quote {
+  color: var(--text-2);
+}
+.cm-md-list {
+  color: var(--accent-text);
+}
+.cm-md-strike {
+  text-decoration: line-through;
+  color: var(--text-3);
+}

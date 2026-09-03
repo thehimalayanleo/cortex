@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: cortex
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: CORTEX_DEMO
+        value: "1"
+      - key: CORTEX_VAULT
+        value: /data/cortex
+      - key: CORTEX_MODEL
+        value: glm-5.3
+      - key: CORTEX_BASE_URL
+        value: https://opencode.ai/zen/go/v1
+      - key: CORTEX_API_KEY
+        sync: false

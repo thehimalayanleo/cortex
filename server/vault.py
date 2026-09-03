@@ -207,17 +207,20 @@ def write_meta(pid: str, meta: dict) -> None:
     (d / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False))
 
 
-def list_library(status: str | None = None, topic: str | None = None, q: str | None = None) -> list[dict]:
+def list_library(status: str | None = None, topic: str | None = None, q: str | None = None, project: str | None = None) -> list[dict]:
     out = []
     for d in (VAULT / "library").iterdir():
         m = read_meta(d.name) if d.is_dir() else None
         if m:
             m["has_pdf"] = (d / "paper.pdf").exists()
+            m.setdefault("projects", [])
             out.append(m)
     if status:
         out = [m for m in out if m.get("status") == status]
     if topic:
         out = [m for m in out if topic in (m.get("topics") or [])]
+    if project:  # a "space": papers assigned to that project slug; "none" = unassigned
+        out = [m for m in out if (not (m.get("projects") or []) if project == "none" else project in (m.get("projects") or []))]
     if q:
         ql = q.lower()
         out = [m for m in out if ql in (m.get("title", "") + " " + m.get("authors", "") + " " + m.get("takeaway", "")).lower()]

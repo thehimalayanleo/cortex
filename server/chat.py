@@ -185,12 +185,28 @@ def _context_line(ctx: dict | None) -> str:
     return ""
 
 
+def _space_line(ctx: dict | None) -> str:
+    """The active space (a project used as a workspace): its verdict, next action, and papers."""
+    slug = str((ctx or {}).get("space") or "")
+    if not slug or slug == "all":
+        return ""
+    p = vault.get_project(slug)
+    if not p:
+        return ""
+    fm = p["frontmatter"]
+    papers = vault.list_library(project=slug)
+    titles = "; ".join(f"{m.get('title','')[:60]} ({m.get('id')})" for m in papers[:25])
+    return (f"\nACTIVE SPACE: \"{fm.get('title', slug)}\" (project slug {slug}); status {fm.get('status')}; verdict: {fm.get('verdict') or 'none yet'}; "
+            f"next action: {fm.get('next_action') or 'none'}. Papers in this space ({len(papers)}): {titles or 'none yet'}. "
+            f"Prefer these when the user speaks about 'this project' or 'these papers'. Link: cortex://project/{slug}")
+
+
 def stream(channel: str, content: str, model: str | None = None, context: dict | None = None) -> Iterator[dict]:
     model = model or DEFAULT_MODEL
     history = vault.read_chat(channel, limit=40)
     user_msg = {"id": uuid.uuid4().hex, "role": "user", "content": content, "ts": int(time.time() * 1000)}
     vault.append_chat(channel, user_msg)
-    messages: list[dict] = [{"role": "system", "content": system_prompt(channel) + _context_line(context)}]
+    messages: list[dict] = [{"role": "system", "content": system_prompt(channel) + _space_line(context) + _context_line(context)}]
     for m in history[-16:]:
         if m.get("content"):
             messages.append({"role": m["role"], "content": m["content"][:6000]})

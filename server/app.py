@@ -235,8 +235,8 @@ class PaperPatch(BaseModel):
 
 
 @app.get("/api/library")
-def library(status: str | None = None, topic: str | None = None, q: str | None = None):
-    return vault.list_library(status, topic, q)
+def library(status: str | None = None, topic: str | None = None, q: str | None = None, project: str | None = None):
+    return vault.list_library(status, topic, q, project)
 
 
 @app.get("/api/library/{pid}")

@@ -89,6 +89,10 @@ Three panes. Left rail 250px: search field (Cmd+K palette), then sections — Da
 
 Design: same identity as the published Cortex artifact — verdigris accent `#2F8F7B` (dark `#4DB39D`), cool green-grey neutrals, `Bricolage Grotesque` for headings and channel names, `IBM Plex Sans` body, `IBM Plex Mono` for meta and the ledger. Light and dark via `prefers-color-scheme` plus a manual toggle. No emoji as UI, no gradients, no purple.
 
+## Layout v2 (2026-09-02, after a day of use)
+
+Three panes, few controls. Left: the papers, with a space switcher on top (All papers, or one project used as a workspace), a status filter, the list, and one Add button. Center: the reader, with a single header line (title, authors, year, link, status, rating, space, one-line takeaway) and the PDF or its notes below. Right: chat with one box and one Send; it knows the open paper and the active space; model choice and agent hand-offs sit in a menu. Projects are spaces: a named group of papers (`meta.projects: [slug]`, `GET /api/library?project=slug`) with a verdict and a next action. Chat history is per space (channel id = slug). Notes, topics, and themes stay reachable through Cmd+K.
+
 ## Import (scripts/import_local.py)
 
 Builds the initial vault from local data, without Notion: papers from `queue.json` (the triaged PDF list with arXiv metadata), notes from the Bear export, projects and topics from the seed list in the script. Idempotent.

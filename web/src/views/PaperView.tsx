@@ -148,6 +148,14 @@ function PaperEditor({ detail, topics }: { detail: PaperDetail; topics: Topic[] 
           <div className="right">
             <SaveStatus status={status} savedAt={savedAt} error={metaSave.error ?? notesSave.error} />
             {tab === "notes" && <ModeSwitch mode={mode} onChange={setMode} />}
+            <button
+              type="button"
+              className="btn sm"
+              title="Open the chat with this paper as context"
+              onClick={() => window.dispatchEvent(new CustomEvent("cortex:ask", { detail: "What is this paper about? Give the core claim, the method, and what I should take from it." }))}
+            >
+              Ask about this paper
+            </button>
             {tab === "pdf" && (
               <>
                 <button

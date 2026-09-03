@@ -121,6 +121,15 @@ export const api = {
     update: (slug: string, patch: { frontmatter?: NoteFrontmatter; body?: string }) =>
       request<Note>(`/notes/${encodeURIComponent(slug)}`, { method: "PUT", body: JSON.stringify(patch) }),
     remove: (slug: string) => request<void>(`/notes/${encodeURIComponent(slug)}`, { method: "DELETE" }),
+    /** Store a pasted/dropped file or image for a note; returns the markdown that embeds it. */
+    attach: (slug: string, file: File) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name || "pasted.png");
+      return request<{ url: string; name: string; kind: "image" | "file"; markdown: string; bytes: number }>(
+        `/notes/${encodeURIComponent(slug)}/attach`,
+        { method: "POST", body: fd },
+      );
+    },
   },
 
   daily: {

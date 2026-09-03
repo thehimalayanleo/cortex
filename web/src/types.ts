@@ -148,4 +148,5 @@ export interface Health {
   ok: boolean;
   vault: string;
   counts: Record<string, number>;
+  inbox?: string;
 }

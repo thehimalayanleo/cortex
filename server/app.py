@@ -18,14 +18,47 @@ from . import agents, chat, vault
 app = FastAPI(title="Cortex", version="0.1")
 
 
+INBOX = None  # set at startup: a folder you can drop PDFs into from Finder; they get filed automatically
+
+
+def _watch_inbox(folder: Path) -> None:
+    """Every few seconds, file any PDF that landed in the inbox folder. Non-PDFs are left alone."""
+    import time
+    seen: dict[str, float] = {}
+    while True:
+        try:
+            for f in sorted(folder.glob("*.pdf")):
+                key = str(f)
+                mtime = f.stat().st_mtime
+                # wait until the file stopped growing (Finder copies are not atomic)
+                if seen.get(key) != mtime:
+                    seen[key] = mtime
+                    continue
+                try:
+                    vault.ingest_pdf(f, {}, move=True)
+                except Exception as e:  # keep the watcher alive; a bad file just stays put
+                    print("inbox: could not ingest", f.name, e)
+                    (folder / (f.name + ".failed")).write_text(str(e))
+                    f.rename(folder / ("failed-" + f.name))
+                seen.pop(key, None)
+        except Exception as e:
+            print("inbox watcher:", e)
+        time.sleep(4)
+
+
 @app.on_event("startup")
 def _startup() -> None:
+    global INBOX
     vault.ensure_dirs()
+    import threading
     if os.environ.get("CORTEX_DEMO") == "1" and vault.counts()["papers"] == 0:
-        import threading
         from scripts.demo_vault import seed  # public sample vault for the hosted demo
         threading.Thread(target=seed, daemon=True).start()
     vault.rebuild_index()
+    INBOX = vault.VAULT / "inbox"
+    INBOX.mkdir(exist_ok=True)
+    (vault.VAULT / "assets").mkdir(exist_ok=True)
+    threading.Thread(target=_watch_inbox, args=(INBOX,), daemon=True).start()
 
 
 def _sse(gen: Iterator[dict]) -> StreamingResponse:
@@ -39,7 +72,46 @@ def _sse(gen: Iterator[dict]) -> StreamingResponse:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "vault": str(vault.VAULT), "counts": vault.counts(), "model": chat.DEFAULT_MODEL, "provider": chat.BASE_URL}
+    return {"ok": True, "vault": str(vault.VAULT), "inbox": str(INBOX or vault.VAULT / "inbox"), "counts": vault.counts(), "model": chat.DEFAULT_MODEL, "provider": chat.BASE_URL}
+
+
+# ---------------------------------------------------------------- attachments (images and files inside notes)
+
+ASSETS = lambda: vault.VAULT / "assets"  # noqa: E731
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+
+def _safe_name(name: str) -> str:
+    import re
+    base = re.sub(r"[^\w.\-]+", "-", name.strip())[:120].strip("-.") or "file"
+    return base
+
+
+@app.post("/api/notes/{slug}/attach")
+async def note_attach(slug: str, file: UploadFile):
+    """Store a pasted or dropped file next to the vault and return the markdown to embed it."""
+    folder = ASSETS() / _safe_name(slug)
+    folder.mkdir(parents=True, exist_ok=True)
+    name = _safe_name(file.filename or "pasted")
+    dst = folder / name
+    stem, ext = dst.stem, dst.suffix
+    n = 1
+    while dst.exists():
+        n += 1
+        dst = folder / f"{stem}-{n}{ext}"
+    dst.write_bytes(await file.read())
+    url = f"/api/assets/{folder.name}/{dst.name}"
+    kind = "image" if dst.suffix.lower() in IMAGE_EXT else "file"
+    md = f"![{dst.stem}]({url})" if kind == "image" else f"[{dst.name}]({url})"
+    return {"url": url, "name": dst.name, "kind": kind, "markdown": md, "bytes": dst.stat().st_size}
+
+
+@app.get("/api/assets/{slug}/{name}")
+def asset_get(slug: str, name: str):
+    p = ASSETS() / _safe_name(slug) / _safe_name(name)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "no such asset")
+    return FileResponse(str(p), headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/topics")

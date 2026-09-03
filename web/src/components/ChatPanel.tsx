@@ -118,6 +118,18 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
     if (focusSignal > 0) composerRef.current?.focus();
   }, [focusSignal]);
 
+  // "Ask about this paper" and friends: other views push a draft into the composer.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const text = String((e as CustomEvent<string>).detail ?? "");
+      if (!text) return;
+      setDraft(text);
+      setTimeout(() => composerRef.current?.focus(), 50);
+    };
+    window.addEventListener("cortex:ask", onAsk);
+    return () => window.removeEventListener("cortex:ask", onAsk);
+  }, []);
+
   // Auto-scroll when the user is near the bottom.
   useEffect(() => {
     const el = logRef.current;

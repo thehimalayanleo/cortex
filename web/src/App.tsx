@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "./api";
 import { NOTE_KINDS } from "./types";
 import type { NoteKind } from "./types";
@@ -70,6 +70,82 @@ function Shell() {
 
   const openNewNote = useCallback(() => setPrompt("note"), []);
   const openNewProject = useCallback(() => setPrompt("project"), []);
+
+  // Drop PDFs anywhere: upload each, file it, open the first. Drops inside the note editor are handled there.
+  const [dropping, setDropping] = useState(false);
+  const dragDepth = useRef(0);
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    dragDepth.current += 1;
+    setDropping(true);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (hasFiles(e)) e.preventDefault();
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDropping(false);
+  };
+  const onDrop = async (e: React.DragEvent) => {
+    dragDepth.current = 0;
+    setDropping(false);
+    if ((e.target as HTMLElement | null)?.closest?.(".cm-editor")) return; // the editor attaches these itself
+    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name));
+    const text = e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain") || "";
+    const arxiv = text.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/)?.[1];
+    if (!files.length && !arxiv) return;
+    e.preventDefault();
+    let first: string | null = null;
+    let n = 0;
+    try {
+      if (arxiv) {
+        const m = await api.library.ingest({ arxiv });
+        first = m.id; n += 1;
+      }
+      for (const f of files) {
+        const m = await api.library.upload(f);
+        first = first ?? m.id; n += 1;
+      }
+      emitCommand("vault-changed");
+      toast(n === 1 ? "Filed 1 paper" : `Filed ${n} papers`);
+      if (first) navigate({ kind: "paper", id: first });
+    } catch (err) {
+      toast(errorMessage(err), "error");
+    }
+  };
+
+  // The inbox folder (~/Cortex/inbox) is filed by the server; notice new papers and refresh.
+  useEffect(() => {
+    let last: number | null = null;
+    const tick = async () => {
+      try {
+        const h = await api.health();
+        const n = h.counts.papers;
+        if (last != null && n > last) {
+          emitCommand("vault-changed");
+          toast(n - last === 1 ? "1 new paper from the inbox folder" : `${n - last} new papers from the inbox folder`);
+        }
+        last = n;
+      } catch {
+        /* server away; try again next tick */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 15000);
+    return () => window.clearInterval(id);
+  }, [toast]);
+
+  // "Ask about this paper": make sure the chat is visible before the panel takes the draft.
+  useEffect(() => {
+    const onAsk = () => {
+      if (chatPref !== "open") setChatPref("open");
+      setChatFocus((n) => n + 1);
+    };
+    window.addEventListener("cortex:ask", onAsk);
+    return () => window.removeEventListener("cortex:ask", onAsk);
+  }, [chatPref, setChatPref]);
 
   // Global keyboard: Cmd+K palette, Cmd+N new note, Cmd+S save now, Cmd+/ toggle chat.
   useEffect(() => {
@@ -147,7 +223,18 @@ function Shell() {
   }
 
   return (
-    <div className={`app ${chatOpen ? "" : "chat-closed"}`}>
+    <div
+      className={`app ${chatOpen ? "" : "chat-closed"}${dropping ? " dropping" : ""}`}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => void onDrop(e)}
+    >
+      {dropping && (
+        <div className="drop-overlay" aria-hidden="true">
+          <div className="drop-card">Drop PDFs to file them in the library</div>
+        </div>
+      )}
       <Sidebar
         route={route}
         chatOpen={chatOpen}

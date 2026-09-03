@@ -189,7 +189,25 @@ export function NoteEditor({ note, topics, banner, allowDelete = true, autoFocus
       <div className={`doc-body mode-${mode}`}>
         {mode !== "preview" && (
           <div className="editor-col">
-            <MarkdownEditor value={draft.body} onChange={(body) => update({ body })} docKey={note.slug} autoFocus={autoFocus} />
+            <MarkdownEditor
+              value={draft.body}
+              onChange={(body) => update({ body })}
+              docKey={note.slug}
+              autoFocus={autoFocus}
+              onFiles={async (files) => {
+                const out: string[] = [];
+                for (const f of files) {
+                  try {
+                    const a = await api.notes.attach(note.slug, f);
+                    out.push(a.markdown);
+                  } catch (e) {
+                    toast(`Could not attach ${f.name || "file"}: ${e instanceof Error ? e.message : String(e)}`, "error");
+                  }
+                }
+                if (out.length) toast(out.length === 1 ? "Attached" : `Attached ${out.length} files`);
+                return out;
+              }}
+            />
           </div>
         )}
         {mode !== "editor" && (

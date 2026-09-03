@@ -7,15 +7,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from server import vault  # noqa: E402
 
-PAPERS = [  # (arxiv id, status, rating, takeaway, topics)
-    ("2502.03407", "read", 4, "Linear probes on activations detect strategic deception where output monitoring alone fails.", ["safety", "interpretability"]),
-    ("2511.16035", "read", 4, "Lie detectors are usually validated in narrow settings; this benchmark spans the lies LLMs actually produce.", ["safety"]),
-    ("2507.11473", "read", 5, "CoT monitoring is a real but fragile safety lever; training pressure can erode it.", ["safety"]),
-    ("2511.13653", "inbox", None, "", ["interpretability", "pursuit"]),
-    ("2510.04871", "read", 5, "A 7M-parameter recursive network beats far larger models on ARC-style reasoning.", ["post-training"]),
-    ("2512.24695", "inbox", None, "", ["continual-learning"]),
-    ("2505.06708", "reading", None, "", ["pretraining", "gpu"]),
-    ("2310.01405", "reference", 4, "Population-level representations, not neurons, as the unit of analysis for transparency.", ["interpretability"]),
+PAPERS = [  # (arxiv id, title, status, rating, takeaway, topics)
+    ("2502.03407", "Detecting Strategic Deception Using Linear Probes", "read", 4, "Linear probes on activations detect strategic deception where output monitoring alone fails.", ["safety", "interpretability"]),
+    ("2511.16035", "Liars' Bench: Evaluating Lie Detectors for Language Models", "read", 4, "Lie detectors are usually validated in narrow settings; this benchmark spans the lies LLMs actually produce.", ["safety"]),
+    ("2507.11473", "Chain of Thought Monitorability: A New and Fragile Opportunity for AI Safety", "read", 5, "CoT monitoring is a real but fragile safety lever; training pressure can erode it.", ["safety"]),
+    ("2511.13653", "Weight-sparse transformers have interpretable circuits", "inbox", None, "", ["interpretability", "pursuit"]),
+    ("2510.04871", "Less is More: Recursive Reasoning with Tiny Networks", "read", 5, "A 7M-parameter recursive network beats far larger models on ARC-style reasoning.", ["post-training"]),
+    ("2512.24695", "Nested Learning: The Illusion of Deep Learning Architectures", "inbox", None, "", ["continual-learning"]),
+    ("2505.06708", "Gated Attention for Large Language Models: Non-linearity, Sparsity, and Attention-Sink-Free", "reading", None, "", ["pretraining", "gpu"]),
+    ("2310.01405", "Representation Engineering: A Top-Down Approach to AI Transparency", "reference", 4, "Population-level representations, not neurons, as the unit of analysis for transparency.", ["interpretability"]),
 ]
 
 TOPICS = [
@@ -59,9 +59,9 @@ def seed() -> None:
         "The chat and the browser agent share the same tools: search the brain, read or file a paper, write a note, update a project. "
         "Every tool call shows in the ledger, so you always see what the agent did.", [])
     vault.append_daily("Demo vault seeded. Try: ask the agent which papers are about deception, then have it file a new arXiv paper.")
-    for aid, status, rating, takeaway, topics in PAPERS:
+    for aid, title, status, rating, takeaway, topics in PAPERS:
         try:
-            vault.ingest_arxiv(aid, status=status, rating=rating, takeaway=takeaway, topics=topics)
+            vault.ingest_arxiv(aid, title=title, status=status, rating=rating, takeaway=takeaway, topics=topics)
         except Exception as e:  # keep going; a missing paper is not fatal for a demo
             print("demo seed skip", aid, e)
     vault.rebuild_index()

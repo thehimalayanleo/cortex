@@ -323,6 +323,9 @@ def ingest_pdf(src: Path, meta: dict | None = None, pid: str | None = None, move
     if not meta.get("title"):
         first = next((l.strip() for l in (head or "").splitlines() if 12 < len(l.strip()) < 160), None)
         meta["title"] = first or src.stem.replace("_", " ").replace("-", " ")
+    # Display-caps titles come out of pdftotext as "R EPRESENTATION E NGINEERING": collapse them.
+    if re.search(r"\b[A-Z] [A-Z]{2,}", meta["title"]):
+        meta["title"] = re.sub(r"\b([A-Z]) (?=[A-Z]{2,})", r"\1", meta["title"]).title().replace("Llm", "LLM").replace("Ai ", "AI ")
     pid = pid or aid or slugify(meta["title"])
     d = _lib_dir(pid); d.mkdir(parents=True, exist_ok=True)
     dst = d / "paper.pdf"

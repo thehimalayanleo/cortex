@@ -8,9 +8,9 @@ WebMCP's proposal, that a page should hand an agent real actions instead of pixe
 
 Cortex is a private research library with three panes: papers on the left, the open PDF in the middle, chat on the right. Projects are spaces, a named group of papers with a one-line verdict and a next action. Everything is a file in a folder: markdown notes with LaTeX, a PDF per paper with extracted text, a small metadata file next to it.
 
-The page registers ten tools with `document.modelContext`, the same actions a person does by clicking:
+The page registers eleven tools with `document.modelContext`, the same actions a person does by clicking:
 
-- read: `search_brain`, `read_note`, `read_paper`, `list_projects`
+- read: `search_brain`, `read_note`, `read_paper`, `key_passages`, `list_projects`
 - show: `open_item`
 - write: `write_note`, `append_today`, `file_paper`, `set_paper`, `update_project`
 
@@ -24,7 +24,7 @@ $$p(\text{deceptive}) = \frac{1}{L}\sum_{\ell} \sigma(w_\ell^\top h_\ell + b_\el
 
 and render it live. The PDF viewer is the browser's own, inverted in dark theme so figures keep their hue.
 
-The WebMCP layer is one file. Each tool wraps the same API call the matching button makes, coerces and bounds every argument, and returns an MCP content block. Read tools carry `readOnlyHint`. Errors come back as `{error}` text so the agent gets a correction instead of a dead page. The built-in chat runs on OpenCode Go (any OpenAI-compatible model works) with the same ten tools on the server side, and it knows which paper is open and which space is active.
+The WebMCP layer is one file. Each tool wraps the same API call the matching button makes, coerces and bounds every argument, and returns an MCP content block. Read tools carry `readOnlyHint`. Errors come back as `{error}` text so the agent gets a correction instead of a dead page. The built-in chat runs on OpenCode Go (any OpenAI-compatible model works) with the same eleven tools on the server side, and it knows which paper is open and which space is active.
 
 Getting papers in is one gesture: drop a PDF on the window, paste an arXiv link, or leave a file in `~/Cortex/inbox` and a watcher files it within seconds.
 

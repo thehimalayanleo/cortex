@@ -30,7 +30,7 @@ The `Dockerfile` builds the web app and serves it with the API. With `CORTEX_DEM
 
 ## WebMCP
 
-`web/src/lib/webmcp.ts` registers ten tools with `document.modelContext` (or `navigator.modelContext` on older Chrome builds). A browser agent in ChatGPT's browser, or in Chrome 149+ with the WebMCP flag, can search the library, open or read a paper, file a new arXiv paper, write a note, or update a project. The person watches it happen and sees every call in the agent ledger. Details are in `SUBMISSION.md`.
+`web/src/lib/webmcp.ts` registers eleven tools with `document.modelContext` (or `navigator.modelContext` on older Chrome builds). A browser agent in ChatGPT's browser, or in Chrome 149+ with the WebMCP flag, can search the library, open or read a paper, file a new arXiv paper, write a note, or update a project. The person watches it happen and sees every call in the agent ledger. Details are in `SUBMISSION.md`.
 
 ## Layout
 

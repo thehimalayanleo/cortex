@@ -149,6 +149,18 @@
   height: 100%;
   background: var(--surface-2);
 }
+/* Dark PDF: the native viewer paints white pages; in dark theme invert the frame and
+   rotate hue back so figures keep roughly their colors. Off in light theme regardless. */
+:root[data-theme="dark"] .pdf-frame.pdf-dark {
+  filter: invert(0.92) hue-rotate(180deg) contrast(0.95);
+  background: #0e1311;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pdf-frame.pdf-dark {
+    filter: invert(0.92) hue-rotate(180deg) contrast(0.95);
+    background: #0e1311;
+  }
+}
 .paper-notes {
   flex: 1 1 auto;
   min-height: 0;

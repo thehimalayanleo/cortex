@@ -28,6 +28,7 @@ function PaperEditor({ detail, topics }: { detail: PaperDetail; topics: Topic[] 
   const id = detail.meta.id;
   const [tab, setTab] = useState<"pdf" | "notes">("pdf");
   const [mode, setMode] = useLocalStorage<ViewMode>("cortex.paper.mode", "split");
+  const [pdfDark, setPdfDark] = useLocalStorage<"on" | "off">("cortex.paper.pdfDark", "on");
 
   const initialMeta = useMemo<MetaDraft>(
     () => ({
@@ -127,14 +128,25 @@ function PaperEditor({ detail, topics }: { detail: PaperDetail; topics: Topic[] 
             <SaveStatus status={status} savedAt={savedAt} error={metaSave.error ?? notesSave.error} />
             {tab === "notes" && <ModeSwitch mode={mode} onChange={setMode} />}
             {tab === "pdf" && (
-              <a className="btn ghost sm" href={api.library.pdfUrl(id)} target="_blank" rel="noopener noreferrer">
-                Open PDF in tab
-              </a>
+              <>
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  aria-pressed={pdfDark === "on"}
+                  title="Invert the PDF so pages are dark; figures keep their hue"
+                  onClick={() => setPdfDark(pdfDark === "on" ? "off" : "on")}
+                >
+                  {pdfDark === "on" ? "Dark PDF: on" : "Dark PDF: off"}
+                </button>
+                <a className="btn ghost sm" href={api.library.pdfUrl(id)} target="_blank" rel="noopener noreferrer">
+                  Open PDF in tab
+                </a>
+              </>
             )}
           </div>
         </div>
         {tab === "pdf" ? (
-          <iframe className="pdf-frame" src={api.library.pdfUrl(id)} title={`PDF: ${m.title}`} />
+          <iframe className={`pdf-frame${pdfDark === "on" ? " pdf-dark" : ""}`} src={api.library.pdfUrl(id)} title={`PDF: ${m.title}`} />
         ) : (
           <div className={`paper-notes mode-${mode}`}>
             {mode !== "preview" && (

@@ -30,6 +30,14 @@ FastAPI + SQLite FTS5 over a plain-file vault; Vite + React + CodeMirror 6 + KaT
 ## Prior vs new work
 Everything in this repository was created during the submission period (first commit timestamps in `git log`).
 
+## Video script (under 3 minutes)
+0:00 The problem: reading, filing, deciding live in four tools; the agent lives in a fifth. Show the vault folder: plain markdown and PDFs.
+0:25 The app: daily page, a note with LaTeX rendering live, the library with a PDF open and its status/rating strip.
+0:55 WebMCP: open the same page in ChatGPT's browser. Ask: "Which papers here are about deception? Open the strongest one." Watch the paper open in the center pane and the agent ledger list `search_brain` and `open_item`.
+1:30 Ask: "Set it to reading with the takeaway 'probes beat output monitoring', then file arXiv 2511.13653 and append a line to today's daily page." Show `set_paper`, `file_paper` (PDF downloads and opens), `append_today`, and the daily page updating.
+2:10 The built-in chat does the same with the same tools on any OpenAI-compatible model; "Hand to Codex" runs a coding agent inside the vault folder.
+2:35 Close: one vault, one page, the same ten tools for the person and the agent. Repo link, MIT.
+
 ## Demo
 Live URL: https://cortex.aftersave.app (public demo vault of arXiv papers) · Repo: https://github.com/thehimalayanleo/cortex · Video: (< 3 min, to add)
 

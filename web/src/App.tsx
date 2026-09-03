@@ -22,6 +22,7 @@ import { NotesList } from "./views/NotesList";
 import { LibraryList } from "./views/LibraryList";
 import { ProjectsList } from "./views/ProjectsList";
 import { TopicsList, TopicView } from "./views/TopicsView";
+import { Resizer } from "./components/Resizer";
 
 export default function App() {
   return (
@@ -158,7 +159,11 @@ function Shell() {
         agentToolCount={10}
       />
       <main className="center" aria-live="polite">
+        <Resizer cssVar="--rail-w" storageKey="cortex.w.rail" defaultPx={250} min={180} max={480} grows="right" label="Resize sidebar" className="at-left" />
         {view}
+        {chatOpen && (
+          <Resizer cssVar="--chat-w" storageKey="cortex.w.chat" defaultPx={380} min={300} max={760} grows="left" label="Resize chat" className="at-right" />
+        )}
       </main>
       <aside className="chat" aria-label="Chat" hidden={!chatOpen}>
         <ChatPanel focusSignal={chatFocus} onClose={toggleChat} agentCalls={agentCalls} agentReady={agentReady} />

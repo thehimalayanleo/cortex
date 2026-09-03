@@ -40,6 +40,60 @@
   display: none;
 }
 
+/* pane resize handles: an 8px strip over the pane border, highlighted on hover/drag */
+.resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.resizer:hover::after,
+.resizer:focus-visible::after,
+.resizer.dragging::after {
+  background: var(--accent);
+}
+.resizer:focus-visible {
+  outline: none;
+}
+.resizer.at-left {
+  left: -4px;
+}
+.resizer.at-right {
+  right: -4px;
+}
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.resizing iframe {
+  pointer-events: none; /* the PDF viewer would otherwise swallow the drag */
+}
+.rail,
+.chat {
+  position: relative;
+}
+@media (prefers-reduced-motion: reduce) {
+  .resizer,
+  .resizer::after {
+    transition: none;
+  }
+}
+
 /* generic pane chrome */
 .pane-head {
   display: flex;

@@ -13,6 +13,7 @@ import { ModeSwitch } from "../components/NoteEditor";
 import type { ViewMode } from "../components/NoteEditor";
 import { TopicChips } from "../components/TopicChips";
 import { ErrorState, Loading, SaveStatus } from "../components/States";
+import { Resizer } from "../components/Resizer";
 
 export function PaperView({ id, topics, refresh }: { id: string; topics: Topic[] | null; refresh: number }) {
   const paper = useAsync(() => api.library.get(id), [id], [refresh]);
@@ -117,6 +118,7 @@ function PaperEditor({ detail, topics }: { detail: PaperDetail; topics: Topic[] 
   return (
     <div className="paper">
       <div className="paper-main">
+        <Resizer cssVar="--meta-w" storageKey="cortex.w.meta" defaultPx={300} min={240} max={560} grows="left" label="Resize paper details" className="at-right" />
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === "pdf"} onClick={() => setTab("pdf")}>
             PDF

@@ -107,6 +107,7 @@
   min-height: 0;
 }
 .paper-main {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: flex;

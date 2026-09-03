@@ -86,12 +86,77 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"status": {"type": "string"}}}}},
     {"type": "function", "function": {"name": "update_project", "description": "Update a project's verdict, next_action, or status.",
         "parameters": {"type": "object", "properties": {"slug": {"type": "string"}, "verdict": {"type": "string"}, "next_action": {"type": "string"}, "status": {"type": "string"}}, "required": ["slug"]}}},
+    {"type": "function", "function": {"name": "key_passages", "description": "The most important passages of a paper: theorems, main results, central claim, method, limitation. Verbatim quotes with page numbers, cached per paper. Use when asked what a paper proves or shows, or to highlight it.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "refresh": {"type": "boolean"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "run_agent", "description": "Hand a longer task to a coding agent (codex, opencode, or claude) that runs inside the vault with file tools. Use for multi-file edits, literature sweeps, or anything that needs a shell. Returns its output (bounded).",
         "parameters": {"type": "object", "properties": {"agent": {"type": "string", "enum": ["codex", "opencode", "claude"]}, "task": {"type": "string"}}, "required": ["agent", "task"]}}},
 ]
 
 
+HIGHLIGHT_KINDS = ("theorem", "result", "claim", "method", "limitation")
+
+
+def extract_highlights(pid: str, model: str | None = None, force: bool = False) -> dict:
+    """Pull the theorems, main results, and key claims out of a paper as verbatim passages with page numbers.
+
+    Cached in library/<id>/highlights.json. Each passage is checked against the extracted text, so the model
+    cannot invent a quote; the page comes from the form feeds pdftotext leaves between pages.
+    """
+    import re
+    p = vault.get_paper(pid)
+    if not p:
+        raise ValueError(f"no paper {pid}")
+    cached = vault.read_highlights(pid)
+    if cached and not force:
+        return cached
+    full = vault.paper_text(pid, max_chars=200000)
+    if not full.strip():
+        raise ValueError("no extracted text for this paper yet")
+    pages = full.split("\f")
+    # keep the model's input bounded: first ~45k chars plus the tail (results/conclusion often sit late)
+    body = full if len(full) <= 60000 else full[:45000] + "\n\n[... middle omitted ...]\n\n" + full[-15000:]
+    prompt = (
+        "You are reading a research paper. Extract the 6 to 12 most important passages: theorems, lemmas, main results with their numbers, "
+        "the central claim, the key method statement, and the main stated limitation. Quote each passage VERBATIM from the text "
+        "(20 to 60 words, exact characters, no paraphrase, no ellipsis). Reply with only a JSON array of objects: "
+        '{"kind": one of theorem|result|claim|method|limitation, "quote": "<verbatim>", "why": "<one line on why it matters>"}. '
+        "Order by importance.\n\nPAPER TEXT:\n" + body
+    )
+    resp = client().chat.completions.create(model=model or DEFAULT_MODEL, messages=[{"role": "user", "content": prompt}], temperature=0.1)
+    raw = (resp.choices[0].message.content or "").strip()
+    m = re.search(r"\[[\s\S]*\]", raw)
+    try:
+        items = json.loads(m.group(0) if m else raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"model did not return JSON: {e}")
+
+    def norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+    npages = [norm(pg) for pg in pages]
+    out = []
+    for it in items if isinstance(items, list) else []:
+        q = str(it.get("quote", "")).strip()
+        if len(q) < 15:
+            continue
+        nq = norm(q)
+        page = next((i + 1 for i, pg in enumerate(npages) if nq in pg), None)
+        if page is None:  # try a shorter core of the quote before giving up on it
+            core = " ".join(nq.split()[:12])
+            page = next((i + 1 for i, pg in enumerate(npages) if core and core in pg), None)
+        if page is None:
+            continue  # not in the paper: drop it rather than show an invented quote
+        kind = str(it.get("kind", "claim")).lower()
+        out.append({"kind": kind if kind in HIGHLIGHT_KINDS else "claim", "quote": q[:600], "why": str(it.get("why", ""))[:300], "page": page})
+    result = {"id": pid, "model": model or DEFAULT_MODEL, "generated": time.strftime("%Y-%m-%dT%H:%M:%S"), "items": out[:12]}
+    vault.write_highlights(pid, result)
+    return result
+
+
 def _exec(name: str, a: dict) -> tuple[object, str, str]:
+    if name == "key_passages":
+        r = extract_highlights(str(a["id"]), force=bool(a.get("refresh")))
+        return r["items"], f"{len(r['items'])} passages · {str(a['id'])[:30]}", f"cortex://paper/{a['id']}"
     """Run a tool. Returns (result_for_model, summary_for_ledger, link)."""
     if name == "search_vault":
         types = None if a.get("scope") in (None, "all") else [a["scope"]]

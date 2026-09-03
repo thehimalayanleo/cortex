@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
-import type { PaperDetail, PaperMeta, PaperStatus, Project } from "../types";
+import type { Highlights, PaperDetail, PaperMeta, PaperStatus, Project } from "../types";
 import { PAPER_STATUSES } from "../types";
 import { useAsync, useAutosave, useLocalStorage } from "../lib/hooks";
 import { emitCommand, onCommand } from "../lib/events";
@@ -47,6 +47,35 @@ function PaperPage({ detail, projects }: { detail: PaperDetail; projects: Projec
   const [meta, setMeta] = useState<PaperMeta>(detail.meta);
   const [notesOn, setNotesOn] = useState(false);
   const [mode, setMode] = useLocalStorage<ViewMode>("cortex.paper.mode", "split");
+
+  // Key passages: theorems, results, claims, quoted verbatim with the page they sit on.
+  const [hlOn, setHlOn] = useState(false);
+  const [hl, setHl] = useState<Highlights | null>(null);
+  const [hlBusy, setHlBusy] = useState(false);
+  const [hlError, setHlError] = useState<string | null>(null);
+  const [pdfPage, setPdfPage] = useState<number | null>(null);
+  const loadHighlights = async (refresh = false) => {
+    setHlBusy(true);
+    setHlError(null);
+    try {
+      let h = refresh ? null : await api.library.highlights(id);
+      if (!h || !h.items) h = await api.library.makeHighlights(id, refresh);
+      setHl(h);
+    } catch (e) {
+      setHlError(errorMessage(e));
+    } finally {
+      setHlBusy(false);
+    }
+  };
+  const openHighlights = () => {
+    setNotesOn(false);
+    setHlOn(true);
+    if (!hl) void loadHighlights();
+  };
+  const jumpTo = (page: number) => {
+    setPdfPage(page);
+    setHlOn(false);
+  };
   const [pdfDark, setPdfDark] = useLocalStorage<"on" | "off">("cortex.paper.pdfDark", "on");
 
   // Adopt server metadata on background refetches (chat tools, agents).
@@ -167,14 +196,41 @@ function PaperPage({ detail, projects }: { detail: PaperDetail; projects: Projec
           >
             Ask about this paper
           </button>
-          <button type="button" className="btn sm" aria-pressed={notesOn} onClick={() => setNotesOn(!notesOn)} title={notesOn ? "Back to the PDF" : "Reading notes"}>
+          <button type="button" className="btn sm" aria-pressed={hlOn} onClick={() => (hlOn ? setHlOn(false) : openHighlights())} title={hlOn ? "Back to the PDF" : "Theorems, results, and key claims, quoted with page numbers"}>
+            Highlights
+          </button>
+          <button type="button" className="btn sm" aria-pressed={notesOn} onClick={() => { setHlOn(false); setNotesOn(!notesOn); }} title={notesOn ? "Back to the PDF" : "Reading notes"}>
             Notes
           </button>
         </div>
         <InlineEdit value={meta.takeaway ?? ""} placeholder="One-line takeaway" label="Takeaway" onSave={(v) => void patch({ takeaway: v })} className="takeaway" />
       </header>
 
-      {notesOn ? (
+      {hlOn ? (
+        <div className="highlights" aria-label="Key passages">
+          <div className="hl-head">
+            <span>{hl?.items ? `${hl.items.length} passages` : hlBusy ? "Reading the paper…" : "Key passages"}</span>
+            <span className="grow" />
+            <button type="button" className="btn ghost sm" disabled={hlBusy} onClick={() => void loadHighlights(true)} title="Extract again">
+              {hlBusy ? "Working…" : "Refresh"}
+            </button>
+          </div>
+          {hlError && <div className="hl-error">{hlError}</div>}
+          {hl?.items && hl.items.length === 0 && !hlBusy && <div className="hl-empty">No quotable passages were found in the extracted text.</div>}
+          {hl?.items?.map((h, i) => (
+            <div key={i} className={`hl kind-${h.kind}`}>
+              <div className="hl-meta">
+                <span className="hl-kind">{h.kind}</span>
+                <button type="button" className="hl-page" onClick={() => jumpTo(h.page)} title="Jump to this page in the PDF">
+                  p. {h.page}
+                </button>
+              </div>
+              <blockquote>{h.quote}</blockquote>
+              {h.why && <div className="hl-why">{h.why}</div>}
+            </div>
+          ))}
+        </div>
+      ) : notesOn ? (
         <div className={`paper-notes mode-${mode}`}>
           {mode !== "preview" && (
             <div className="editor-col">
@@ -188,7 +244,13 @@ function PaperPage({ detail, projects }: { detail: PaperDetail; projects: Projec
           )}
         </div>
       ) : (
-        <iframe className={`pdf-frame${pdfDark === "on" ? " pdf-dark" : ""}`} src={api.library.pdfUrl(id)} title={`PDF: ${meta.title}`} onLoad={forwardShortcutsFromFrame} />
+        <iframe
+          key={pdfPage ?? 0}
+          className={`pdf-frame${pdfDark === "on" ? " pdf-dark" : ""}`}
+          src={api.library.pdfUrl(id) + (pdfPage ? `#page=${pdfPage}` : "")}
+          title={`PDF: ${meta.title}`}
+          onLoad={forwardShortcutsFromFrame}
+        />
       )}
     </div>
   );

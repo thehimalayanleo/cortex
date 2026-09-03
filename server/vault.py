@@ -260,6 +260,20 @@ def paper_pdf_path(pid: str) -> Path | None:
     return p if p.exists() else None
 
 
+def read_highlights(pid: str) -> dict | None:
+    p = _lib_dir(pid) / "highlights.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def write_highlights(pid: str, data: dict) -> None:
+    (_lib_dir(pid) / "highlights.json").write_text(json.dumps(data, indent=1, ensure_ascii=False))
+
+
 def paper_text(pid: str, max_chars: int = 60000) -> str:
     p = _lib_dir(pid) / "text.txt"
     return p.read_text(errors="ignore")[:max_chars] if p.exists() else ""

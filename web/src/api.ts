@@ -8,6 +8,7 @@ import type {
   ChatEvent,
   ChatMessage,
   Health,
+  Highlights,
   ModelInfo,
   Note,
   NoteFrontmatter,
@@ -155,6 +156,9 @@ export const api = {
         body: JSON.stringify(patch),
       }),
     pdfUrl: (id: string) => `${BASE}/library/${encodeURIComponent(id)}/pdf`,
+    highlights: (id: string) => request<Highlights>(`/library/${encodeURIComponent(id)}/highlights`),
+    makeHighlights: (id: string, refresh = false) =>
+      request<Highlights>(`/library/${encodeURIComponent(id)}/highlights`, { method: "POST", body: JSON.stringify({ refresh }) }),
     ingest: (src: { path: string } | { arxiv: string } | { url: string }) =>
       request<PaperMeta>("/library/ingest", { method: "POST", body: JSON.stringify(src) }),
     upload: (file: File) => {

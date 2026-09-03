@@ -117,6 +117,19 @@ export const webmcpTools: ModelContextTool[] = [
     execute: async (i) => { const p = await api.library.get(s(i.id, 200)); record("read_paper", i, true, String(p.meta.title ?? p.meta.id)); return text(p); },
   },
   {
+    name: "key_passages",
+    description: "The most important passages of a paper, quoted verbatim with page numbers: theorems, main results, the central claim, the method, the stated limitation. Cached per paper; refresh: true re-extracts.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, refresh: { type: "boolean" } }, required: ["id"] },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const pid = s(i.id, 200);
+      let h = i.refresh ? null : await api.library.highlights(pid);
+      if (!h || !h.items) h = await api.library.makeHighlights(pid, !!i.refresh);
+      record("key_passages", i, true, `${pid} · ${h.items?.length ?? 0} passages`);
+      return text(h.items ?? []);
+    },
+  },
+  {
     name: "file_paper",
     description: "Add a paper to the library from an arXiv id or arXiv URL: the PDF is downloaded, its text indexed, and the paper opened for the user.",
     inputSchema: { type: "object", properties: { arxiv: { type: "string" } }, required: ["arxiv"] },

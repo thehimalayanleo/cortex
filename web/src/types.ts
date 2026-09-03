@@ -151,3 +151,18 @@ export interface Health {
   counts: Record<string, number>;
   inbox?: string;
 }
+
+export type HighlightKind = "theorem" | "result" | "claim" | "method" | "limitation";
+export interface Highlight {
+  kind: HighlightKind;
+  quote: string;
+  why: string;
+  page: number;
+}
+/** Key passages of a paper. `items` is null until they have been extracted. */
+export interface Highlights {
+  id: string;
+  model?: string;
+  generated?: string;
+  items: Highlight[] | null;
+}

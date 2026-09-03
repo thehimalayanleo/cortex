@@ -255,6 +255,27 @@ def paper_put(pid: str, p: PaperPatch):
     return r
 
 
+class HighlightsIn(BaseModel):
+    model: str | None = None
+    refresh: bool = False
+
+
+@app.get("/api/library/{pid}/highlights")
+def paper_highlights(pid: str):
+    """Cached key passages, or {items: null} when they have not been extracted yet."""
+    return vault.read_highlights(pid) or {"id": pid, "items": None}
+
+
+@app.post("/api/library/{pid}/highlights")
+def paper_highlights_make(pid: str, h: HighlightsIn):
+    try:
+        return chat.extract_highlights(pid, h.model, force=h.refresh)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"highlighting failed: {e}")
+
+
 @app.get("/api/library/{pid}/pdf")
 def paper_pdf(pid: str):
     p = vault.paper_pdf_path(pid)

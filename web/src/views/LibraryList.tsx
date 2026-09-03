@@ -129,9 +129,26 @@ export function LibraryList({ status, topic, refresh }: { status?: string; topic
   );
 }
 
+/** Warm the browser cache for a PDF the user is hovering, so opening it is instant. Once per id. */
+const prefetched = new Set<string>();
+function prefetchPdf(paper: PaperMeta) {
+  if (!paper.has_pdf || prefetched.has(paper.id)) return;
+  prefetched.add(paper.id);
+  try {
+    void fetch(api.library.pdfUrl(paper.id), { priority: "low" } as RequestInit).catch(() => prefetched.delete(paper.id));
+  } catch {
+    prefetched.delete(paper.id);
+  }
+}
+
 function PaperRow({ paper }: { paper: PaperMeta }) {
   return (
-    <button className="row" onClick={() => navigate({ kind: "paper", id: paper.id })}>
+    <button
+      className="row"
+      onClick={() => navigate({ kind: "paper", id: paper.id })}
+      onMouseEnter={() => prefetchPdf(paper)}
+      onFocus={() => prefetchPdf(paper)}
+    >
       <span className="title">{paper.title || paper.id}</span>
       <span className="meta">
         <span className="tag">{titleCase(paper.status)}</span>

@@ -5,6 +5,7 @@ import type { SearchHit, SearchType } from "../types";
 import { navigate } from "../lib/router";
 import type { Route } from "../lib/router";
 import { useDebouncedValue } from "../lib/hooks";
+import { PALETTES, applyPalette, readPaletteId } from "../lib/palettes";
 
 interface Props {
   open: boolean;
@@ -84,6 +85,17 @@ export function SearchPalette({ open, onClose, onNewNote }: Props) {
 
   const items = useMemo<Item[]>(() => {
     const close = onClose;
+    const current = readPaletteId();
+    const themeItems: Item[] = PALETTES.map((p) => ({
+      key: `theme:${p.id}`,
+      title: `Theme: ${p.name}`,
+      group: "Theme",
+      hint: p.id === current ? "current" : p.dark ? "dark" : "light",
+      run: () => {
+        applyPalette(p.id);
+        close();
+      },
+    }));
     if (!dq) {
       const go = (r: Route) => () => {
         close();
@@ -105,9 +117,15 @@ export function SearchPalette({ open, onClose, onNewNote }: Props) {
         { key: "library", title: "Library", group: "Go to", run: go({ kind: "library" }) },
         { key: "projects", title: "Projects", group: "Go to", run: go({ kind: "projects" }) },
         { key: "topics", title: "Topics", group: "Go to", run: go({ kind: "topics" }) },
+        ...themeItems,
       ];
     }
     const out: Item[] = [];
+    // Typed queries: theme commands match on "theme" or the palette name (like VS Code's "Preferences: Color Theme").
+    const q = dq.toLowerCase();
+    for (const t of themeItems) {
+      if (q.startsWith("theme") || t.title.toLowerCase().includes(q)) out.push(t);
+    }
     for (const t of GROUP_ORDER) {
       for (const h of hits.filter((x) => x.type === t)) {
         out.push({

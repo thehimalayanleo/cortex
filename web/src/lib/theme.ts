@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { PALETTES, clearPalette } from "./palettes";
 
 export type ThemePref = "system" | "light" | "dark";
 const KEY = "cortex.theme";
@@ -15,6 +16,10 @@ export function readThemePref(): ThemePref {
 
 export function applyTheme(pref: ThemePref) {
   const root = document.documentElement;
+  // A color palette pins its own scheme; switching to the other scheme (or system) drops the palette
+  // so its tokens never render on the wrong ground.
+  const active = root.dataset.palette ? PALETTES.find((p) => p.id === root.dataset.palette) : undefined;
+  if (active && (pref === "system" ? resolvedTheme("system") : pref) !== (active.dark ? "dark" : "light")) clearPalette();
   if (pref === "system") delete root.dataset.theme;
   else root.dataset.theme = pref;
   try {

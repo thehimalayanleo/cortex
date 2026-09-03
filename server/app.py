@@ -183,7 +183,9 @@ def paper_pdf(pid: str):
     p = vault.paper_pdf_path(pid)
     if not p:
         raise HTTPException(404, "no pdf")
-    return FileResponse(str(p), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{pid}.pdf"'})
+    # PDFs are immutable per id: let the browser keep them for a day so reopening a paper is instant.
+    return FileResponse(str(p), media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{pid}.pdf"', "Cache-Control": "private, max-age=86400"})
 
 
 @app.post("/api/library/ingest")

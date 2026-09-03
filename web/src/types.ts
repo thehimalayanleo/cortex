@@ -60,6 +60,7 @@ export type PaperStatus = "inbox" | "reading" | "read" | "reference";
 export const PAPER_STATUSES: PaperStatus[] = ["inbox", "reading", "read", "reference"];
 
 export interface PaperMeta {
+  has_pdf?: boolean; // set on list rows by the server
   id: string;
   title: string;
   authors: string | string[]; // server stores a comma-separated string; older data may be an array

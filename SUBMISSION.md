@@ -12,7 +12,7 @@ Research work is a loop of reading, filing, and deciding. Today each step lives 
 - Agent input is treated as untrusted: every argument is coerced and bounded before it touches the vault.
 
 ## WebMCP implementation
-`web/src/lib/webmcp.ts` registers ten tools with `navigator.modelContext.registerTool` (feature-detected; the app works without it):
+`web/src/lib/webmcp.ts` registers ten tools with `document.modelContext.registerTool` (falling back to `navigator.modelContext`) (feature-detected; the app works without it):
 
 | tool | what it does |
 |---|---|

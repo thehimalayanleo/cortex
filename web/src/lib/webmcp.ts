@@ -29,6 +29,17 @@ declare global {
   interface Navigator {
     modelContext?: ModelContext;
   }
+  interface Document {
+    modelContext?: ModelContext;
+  }
+}
+
+/** The spec moved the entry point from navigator to document; ChatGPT's browser and Chrome differ by build. Accept either. */
+function modelContext(): ModelContext | undefined {
+  if (typeof document !== "undefined" && document.modelContext) return document.modelContext;
+  if (typeof navigator !== "undefined" && navigator.modelContext) return navigator.modelContext;
+  const w = window as unknown as { modelContext?: ModelContext };
+  return w.modelContext;
 }
 
 const text = (v: unknown): ToolResult => ({ content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v, null, 1) }] });
@@ -175,7 +186,7 @@ export function installWebMCP(): boolean {
       return guarded(t).execute(input);
     },
   };
-  const mc = typeof navigator !== "undefined" ? navigator.modelContext : undefined;
+  const mc = modelContext();
   if (!mc) return false;
   for (const t of webmcpTools) {
     try { mc.registerTool(guarded(t)); } catch (e) { console.warn("webmcp: could not register", t.name, e); }
@@ -183,4 +194,4 @@ export function installWebMCP(): boolean {
   return true;
 }
 
-export const webmcpAvailable = () => typeof navigator !== "undefined" && !!navigator.modelContext;
+export const webmcpAvailable = () => !!modelContext();

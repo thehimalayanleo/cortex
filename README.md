@@ -11,6 +11,12 @@ cd cortex/web && pnpm install && pnpm build   # build the front end once (pnpm d
 
 Chat uses OpenCode Go by default. The key is read from `~/.local/share/opencode/auth.json` or `OPENCODE_API_KEY`. Any OpenAI-compatible provider works: set `CORTEX_BASE_URL`, `CORTEX_API_KEY`, and `CORTEX_MODEL`.
 
+## Run it as a login service (macOS)
+
+```bash
+cd cortex && scripts/install_service.sh   # starts at login, restarts if it dies; `scripts/install_service.sh remove` to undo
+```
+
 ## Getting papers in
 
 Drop a PDF anywhere on the window, paste an arXiv link into the Add box, or put PDFs in `~/Cortex/inbox` and they file themselves within a few seconds. Images and files pasted into a note are stored under `~/Cortex/assets`.

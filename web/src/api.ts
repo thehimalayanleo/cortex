@@ -146,8 +146,8 @@ export const api = {
   },
 
   library: {
-    list: (p: { status?: string; topic?: string; q?: string } = {}) =>
-      request<PaperMeta[]>(`/library${qs({ status: p.status, topic: p.topic, q: p.q })}`),
+    list: (p: { status?: string; topic?: string; q?: string; project?: string } = {}) =>
+      request<PaperMeta[]>(`/library${qs({ status: p.status, topic: p.topic, q: p.q, project: p.project })}`),
     get: (id: string) => request<PaperDetail>(`/library/${encodeURIComponent(id)}`),
     update: (id: string, patch: Partial<PaperMeta> & { notes?: string }) =>
       request<PaperDetail | PaperMeta>(`/library/${encodeURIComponent(id)}`, {
@@ -172,7 +172,7 @@ export const api = {
     clear: (channel: string) => request<void>(`/chat/${encodeURIComponent(channel)}`, { method: "DELETE" }),
     send: (
       channel: string,
-      data: { content: string; model?: string; context?: { kind: string; id: string; title?: string } },
+      data: { content: string; model?: string; context?: { kind?: string; id?: string; title?: string; space?: string } },
       onEvent: (e: ChatEvent) => void,
       signal?: AbortSignal,
     ) =>

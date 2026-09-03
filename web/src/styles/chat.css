@@ -5,50 +5,17 @@
 .chat-head .top {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 8px 0 12px;
-  min-height: 40px;
+  gap: 4px;
+  padding: 8px 8px 8px 14px;
+  min-height: 44px;
 }
 .chat-head .top h2 {
   font-size: var(--fs-md);
   flex: 1 1 auto;
-}
-.channel-tabs {
-  display: flex;
-  gap: 0;
-  padding: 4px 8px 0;
-  overflow-x: auto;
-}
-.channel-tabs button {
-  height: 30px;
-  padding: 0 10px;
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: var(--fs-sm);
-  color: var(--text-3);
-  border-bottom: 2px solid transparent;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  min-width: 0;
   white-space: nowrap;
-  border-radius: 0;
-}
-.channel-tabs button:focus-visible {
-  outline-offset: -2px;
-}
-.channel-tabs button:hover {
-  color: var(--text);
-}
-.channel-tabs button[aria-selected="true"] {
-  color: var(--accent-text);
-  border-bottom-color: var(--accent);
-}
-.channel-tabs .n {
-  font-family: var(--font-mono);
-  font-weight: 400;
-  font-size: 10px;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chat-desc {
   padding: 2px 12px 8px;
@@ -326,33 +293,4 @@
 }
 .agent-run .foot.bad {
   color: var(--danger);
-}
-
-/* panel tabs: Chat | Agent ledger */
-.panel-tabs {
-  display: inline-flex;
-  gap: 2px;
-}
-.panel-tabs button {
-  height: 26px;
-  padding: 0 9px;
-  border-radius: var(--r-sm);
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: var(--fs-md);
-  color: var(--text-3);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.panel-tabs button[aria-selected="true"] {
-  color: var(--text);
-  background: var(--surface-2);
-}
-.panel-tabs .n {
-  font-family: var(--font-mono);
-  font-weight: 400;
-  font-size: 10px;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
 }

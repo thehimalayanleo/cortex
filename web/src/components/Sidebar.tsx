@@ -1,338 +1,293 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import { api } from "../api";
-import type { NoteKind, NoteSummary, PaperStatus, Project, ProjectStatus } from "../types";
-import { PAPER_STATUSES, PROJECT_STATUSES } from "../types";
-import { onCommand } from "../lib/events";
-import { navigate, routeToHash } from "../lib/router";
+import { useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+import { api, errorMessage } from "../api";
+import type { PaperMeta, Project } from "../types";
+import { navigate } from "../lib/router";
 import type { Route } from "../lib/router";
 import { useAsync, useLocalStorage } from "../lib/hooks";
 import type { ThemePref } from "../lib/theme";
-import { titleCase } from "../lib/format";
+import { authorsLine } from "../lib/format";
+import { Popover } from "./Popover";
+import { useToast } from "./Toast";
 
 interface Props {
   route: Route;
+  space: string;
+  projects: Project[] | null;
+  onSpace: (slug: string) => void;
+  onNewSpace: () => void;
+  onFiled: (metas: PaperMeta[]) => void;
+  refresh: number;
   chatOpen: boolean;
   onToggleChat: () => void;
   onOpenPalette: () => void;
-  onNewNote: () => void;
   themePref: ThemePref;
   onTheme: (p: ThemePref) => void;
   agentReady: boolean;
   agentToolCount: number;
 }
 
-const NOTE_KIND_ORDER: NoteKind[] = ["fleeting", "permanent", "literature", "meeting", "daily"];
-const PER_GROUP = 6;
+type StatusFilter = "all" | "inbox" | "reading" | "read";
+const FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "inbox", label: "Inbox" },
+  { id: "reading", label: "Reading" },
+  { id: "read", label: "Read" },
+];
 
-function useVaultTick() {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    let t: number | null = null;
-    return onCommand("vault-changed", () => {
-      if (t) window.clearTimeout(t);
-      t = window.setTimeout(() => setTick((n) => n + 1), 400);
-    });
-  }, []);
-  return tick;
+/** Warm the browser cache for a PDF the user is hovering, so opening it is instant. Once per id. */
+const prefetched = new Set<string>();
+export function prefetchPdf(paper: PaperMeta) {
+  if (!paper.has_pdf || prefetched.has(paper.id)) return;
+  prefetched.add(paper.id);
+  try {
+    void fetch(api.library.pdfUrl(paper.id), { priority: "low" } as RequestInit).catch(() => prefetched.delete(paper.id));
+  } catch {
+    prefetched.delete(paper.id);
+  }
 }
 
-export function Sidebar({ route, chatOpen, onToggleChat, onOpenPalette, onNewNote, themePref, onTheme, agentReady, agentToolCount }: Props) {
-  const tick = useVaultTick();
-  const health = useAsync(() => api.health(), [tick]);
-  const notes = useAsync(() => api.notes.list({ limit: 500 }), [tick]);
-  const library = useAsync(() => api.library.list(), [tick]);
-  const projects = useAsync(() => api.projects.list(), [tick]);
-  const topics = useAsync(() => api.topics(), [tick]);
+/** An arXiv id or URL, any other URL, or a local path. */
+export function detectSource(raw: string): { arxiv: string } | { url: string } | { path: string } | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const id = /(\d{4}\.\d{4,5})(?:v\d+)?/.exec(s);
+  if (id && (/arxiv\.org/i.test(s) || /^(arxiv:)?\d{4}\.\d{4,5}(v\d+)?$/i.test(s))) return { arxiv: id[1] };
+  if (/^[~/]/.test(s)) return { path: s };
+  if (/^https?:\/\//i.test(s)) return { url: s };
+  return { url: `https://${s}` };
+}
 
-  const current = routeToHash(route);
-  const is = (r: Route) => routeToHash(r) === current;
+export function Sidebar({ route, space, projects, onSpace, onNewSpace, onFiled, refresh, chatOpen, onToggleChat, onOpenPalette, themePref, onTheme, agentReady, agentToolCount }: Props) {
+  const [status, setStatus] = useLocalStorage<StatusFilter>("cortex.rail.status", "all");
+  const [q, setQ] = useState("");
+  const papers = useAsync(
+    () => api.library.list({ status: status === "all" ? undefined : status, project: space === "all" ? undefined : space }),
+    [status, space],
+    [refresh],
+  );
 
-  const noteGroups = useMemo(() => {
-    const list = [...(notes.data ?? [])].sort((a, b) => String(b.updated ?? "").localeCompare(String(a.updated ?? "")));
-    const groups = new Map<NoteKind, NoteSummary[]>();
-    for (const n of list) {
-      const k = (n.kind ?? "fleeting") as NoteKind;
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k)!.push(n);
-    }
-    const ordered = NOTE_KIND_ORDER.filter((k) => groups.has(k));
-    for (const k of groups.keys()) if (!ordered.includes(k)) ordered.push(k);
-    return ordered.map((k) => ({ kind: k, items: groups.get(k)! }));
-  }, [notes.data]);
+  const list = useMemo(() => {
+    const all = papers.data ?? [];
+    const needle = q.trim().toLowerCase();
+    if (!needle) return all;
+    return all.filter((p) => `${p.title} ${authorsLine(p.authors, 50)} ${p.year ?? ""} ${p.id}`.toLowerCase().includes(needle));
+  }, [papers.data, q]);
 
-  const libCounts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const p of library.data ?? []) c[p.status] = (c[p.status] ?? 0) + 1;
-    return c;
-  }, [library.data]);
+  const spaces = useMemo(() => {
+    const ps = projects ?? [];
+    const active = ps.filter((p) => (p.frontmatter.status ?? "active") === "active");
+    const rest = ps.filter((p) => (p.frontmatter.status ?? "active") !== "active");
+    const byTitle = (a: Project, b: Project) => String(a.frontmatter.title ?? a.slug).localeCompare(String(b.frontmatter.title ?? b.slug));
+    return [...active.sort(byTitle), ...rest.sort(byTitle)];
+  }, [projects]);
 
-  const projectGroups = useMemo(() => {
-    const groups = new Map<string, Project[]>();
-    for (const p of projects.data ?? []) {
-      const s = (p.frontmatter?.status ?? "active") as string;
-      if (!groups.has(s)) groups.set(s, []);
-      groups.get(s)!.push(p);
-    }
-    const ordered: string[] = [...PROJECT_STATUSES.filter((s) => groups.has(s))];
-    for (const k of groups.keys()) if (!ordered.includes(k)) ordered.push(k);
-    return ordered.map((s) => ({ status: s as ProjectStatus, items: groups.get(s)! }));
-  }, [projects.data]);
-
+  const openId = route.kind === "paper" ? route.id : null;
   const themeLabel = themePref === "system" ? "Theme: system" : themePref === "dark" ? "Theme: dark" : "Theme: light";
   const cycleTheme = () => onTheme(themePref === "system" ? "light" : themePref === "light" ? "dark" : "system");
 
   return (
-    <nav className="rail" aria-label="Vault">
+    <nav className="rail" aria-label="Papers">
       <div className="rail-top">
         <div className="brand">
           <span className="name">Cortex</span>
-          {health.data?.vault && (
-            <span className="vault" title={health.data.vault}>
-              {health.data.vault}
-            </span>
+        </div>
+        <div className="space-row">
+          <select
+            className="select sm space-select"
+            value={space}
+            aria-label="Space"
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "__new") onNewSpace();
+              else onSpace(v);
+            }}
+          >
+            <option value="all">All papers</option>
+            {spaces.map((p) => (
+              <option key={p.slug} value={p.slug}>
+                {String(p.frontmatter.title ?? p.slug)}
+              </option>
+            ))}
+            <option value="__new">New space…</option>
+          </select>
+          {space !== "all" && (
+            <button
+              className="icon-btn"
+              onClick={() => navigate({ kind: "project", slug: space })}
+              title="Open space page"
+              aria-label="Open space page"
+              aria-current={route.kind === "project" && route.slug === space ? true : undefined}
+            >
+              <ArrowIcon />
+            </button>
           )}
         </div>
-        <button className="search-btn" onClick={onOpenPalette} aria-label="Search (Cmd+K)">
-          <SearchIcon />
-          <span>Search</span>
-          <span className="k">⌘K</span>
-        </button>
-      </div>
-
-      <div className="rail-body">
-        <RailSection id="daily" title="Daily" active={is({ kind: "daily" })} onOpen={() => navigate({ kind: "daily" })}>
-          <button className="rail-item" aria-current={is({ kind: "daily" }) || undefined} onClick={() => navigate({ kind: "daily" })}>
-            <span className="t">Today</span>
+        <div className="rail-search">
+          <input className="input sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter papers" aria-label="Filter papers" spellCheck={false} />
+          <button className="k" onClick={onOpenPalette} title="Search everything (Cmd+K)" aria-label="Search everything">
+            ⌘K
           </button>
-        </RailSection>
-
-        <RailSection
-          id="notes"
-          title="Notes"
-          count={notes.data?.length}
-          active={route.kind === "notes" && !route.noteKind}
-          onOpen={() => navigate({ kind: "notes" })}
-          action={
-            <button className="icon-btn" onClick={onNewNote} title="New note (Cmd+N)" aria-label="New note">
-              <PlusIcon />
-            </button>
-          }
-        >
-          <Status state={notes} empty="No notes yet" />
-          {noteGroups.map((g) => (
-            <div key={g.kind}>
-              <button
-                className="sub-head"
-                aria-current={route.kind === "notes" && route.noteKind === g.kind ? true : undefined}
-                onClick={() => navigate({ kind: "notes", noteKind: g.kind })}
-              >
-                {g.kind}
-                <span className="n">{g.items.length}</span>
-              </button>
-              {g.items.slice(0, PER_GROUP).map((n) => (
-                <button
-                  key={n.slug}
-                  className="rail-item"
-                  aria-current={is({ kind: "note", slug: n.slug }) || undefined}
-                  onClick={() => navigate({ kind: "note", slug: n.slug })}
-                  title={n.title}
-                >
-                  <span className="t">{n.title || n.slug}</span>
-                </button>
-              ))}
-              {g.items.length > PER_GROUP && (
-                <button className="rail-item more" onClick={() => navigate({ kind: "notes", noteKind: g.kind })}>
-                  <span className="t">+{g.items.length - PER_GROUP} more</span>
-                </button>
-              )}
-            </div>
-          ))}
-        </RailSection>
-
-        <RailSection
-          id="library"
-          title="Library"
-          count={library.data?.length}
-          active={route.kind === "library" && !route.status && !route.topic}
-          onOpen={() => navigate({ kind: "library" })}
-        >
-          <Status state={library} empty="No papers yet" />
-          {library.data &&
-            PAPER_STATUSES.map((s: PaperStatus) => (
-              <button
-                key={s}
-                className="rail-item"
-                aria-current={route.kind === "library" && route.status === s ? true : undefined}
-                onClick={() => navigate({ kind: "library", status: s })}
-              >
-                <span className="t">{titleCase(s)}</span>
-                <span className="n">{libCounts[s] ?? 0}</span>
-              </button>
-            ))}
-        </RailSection>
-
-        <RailSection
-          id="projects"
-          title="Projects"
-          count={projects.data?.length}
-          active={route.kind === "projects" && !route.status}
-          onOpen={() => navigate({ kind: "projects" })}
-        >
-          <Status state={projects} empty="No projects yet" />
-          {projectGroups.map((g) => {
-            const limit = g.status === "active" ? 12 : 3;
-            return (
-              <div key={g.status}>
-                <button
-                  className="sub-head"
-                  aria-current={route.kind === "projects" && route.status === g.status ? true : undefined}
-                  onClick={() => navigate({ kind: "projects", status: g.status })}
-                >
-                  {g.status}
-                  <span className="n">{g.items.length}</span>
-                </button>
-                {g.items.slice(0, limit).map((p) => (
-                  <button
-                    key={p.slug}
-                    className="rail-item"
-                    aria-current={is({ kind: "project", slug: p.slug }) || undefined}
-                    onClick={() => navigate({ kind: "project", slug: p.slug })}
-                    title={p.frontmatter?.title ?? p.slug}
-                  >
-                    <span className="t">{p.frontmatter?.title ?? p.slug}</span>
-                  </button>
-                ))}
-                {g.items.length > limit && (
-                  <button className="rail-item more" onClick={() => navigate({ kind: "projects", status: g.status })}>
-                    <span className="t">+{g.items.length - limit} more</span>
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </RailSection>
-
-        <RailSection id="topics" title="Topics" count={topics.data?.length} active={route.kind === "topics"} onOpen={() => navigate({ kind: "topics" })}>
-          <Status state={topics} empty="No topics yet" />
-          {(topics.data ?? []).slice(0, 14).map((t) => (
-            <button
-              key={t.slug}
-              className="rail-item"
-              aria-current={is({ kind: "topic", slug: t.slug }) || undefined}
-              onClick={() => navigate({ kind: "topic", slug: t.slug })}
-              title={t.one_liner ?? t.name}
-            >
-              <span className="t">{t.name}</span>
+        </div>
+        <div className="seg" role="group" aria-label="Status">
+          {FILTERS.map((f) => (
+            <button key={f.id} type="button" aria-pressed={status === f.id} onClick={() => setStatus(f.id)}>
+              {f.label}
             </button>
           ))}
-          {(topics.data?.length ?? 0) > 14 && (
-            <button className="rail-item more" onClick={() => navigate({ kind: "topics" })}>
-              <span className="t">+{(topics.data?.length ?? 0) - 14} more</span>
-            </button>
-          )}
-        </RailSection>
+        </div>
       </div>
 
-      <div className="rail-agent" title={agentReady ? "This page exposes its tools to the browser's agent via WebMCP" : "WebMCP not detected in this browser"}>
-        <span className={`pill ${agentReady ? "ok" : ""}`}>
-          {agentReady ? `Agent-ready · ${agentToolCount} tools` : "Agent tools: open in Chrome 149+ with WebMCP or ChatGPT's browser"}
-        </span>
+      <div className="rail-list" aria-busy={papers.loading}>
+        {papers.loading && !papers.data && <div className="rail-empty">loading…</div>}
+        {papers.error && (
+          <div className="rail-empty" title={papers.error}>
+            unavailable ·{" "}
+            <button style={{ color: "var(--accent-text)" }} onClick={papers.reload}>
+              retry
+            </button>
+          </div>
+        )}
+        {papers.data && list.length === 0 && <div className="rail-empty">{q ? "No matches." : "No papers here."}</div>}
+        {list.map((p) => (
+          <PaperRow key={p.id} paper={p} current={p.id === openId} />
+        ))}
       </div>
+
       <div className="rail-foot">
+        <AddPaper onFiled={onFiled} />
+        <div className="links">
+          <button className="lnk" onClick={() => navigate({ kind: "daily" })} aria-current={route.kind === "daily" || undefined}>
+            Today
+          </button>
+          <button className="lnk" onClick={() => navigate({ kind: "notes" })} aria-current={route.kind === "notes" || route.kind === "note" || undefined}>
+            Notes
+          </button>
+          <span className="grow" />
+          <button className="icon-btn" onClick={cycleTheme} title={`${themeLabel} (click to change)`} aria-label={themeLabel}>
+            {themePref === "dark" ? <MoonIcon /> : themePref === "light" ? <SunIcon /> : <AutoIcon />}
+          </button>
+          <button className="icon-btn" onClick={onToggleChat} title={chatOpen ? "Hide chat (Cmd+/)" : "Show chat (Cmd+/)"} aria-label={chatOpen ? "Hide chat" : "Show chat"} aria-pressed={chatOpen}>
+            <PanelIcon />
+          </button>
+        </div>
         <span
-          className={`status-dot ${health.data?.ok ? "ok" : ""}`}
-          title={health.error ? `Server unreachable: ${health.error}` : health.data?.ok ? "Server connected" : "Connecting"}
-          aria-hidden="true"
-        />
-        <span className="grow" title={health.error ?? health.data?.vault ?? ""}>
-          {health.loading ? "connecting…" : health.error ? "server offline" : "connected"}
-        </span>
-        <button className="icon-btn" onClick={cycleTheme} title={`${themeLabel} (click to change)`} aria-label={themeLabel}>
-          {themePref === "dark" ? <MoonIcon /> : themePref === "light" ? <SunIcon /> : <AutoIcon />}
-        </button>
-        <button
-          className="icon-btn"
-          onClick={onToggleChat}
-          title={chatOpen ? "Hide chat (Cmd+/)" : "Show chat (Cmd+/)"}
-          aria-label={chatOpen ? "Hide chat" : "Show chat"}
-          aria-pressed={chatOpen}
+          className={`pill ${agentReady ? "ok" : ""}`}
+          title={agentReady ? "This page exposes its tools to the browser's agent via WebMCP" : "WebMCP not detected: open in Chrome 149+ with WebMCP or ChatGPT's browser"}
         >
-          <PanelIcon />
-        </button>
+          {agentReady ? `Agent tools on · ${agentToolCount}` : "Agent tools off"}
+        </span>
       </div>
     </nav>
   );
 }
 
-function RailSection({
-  id,
-  title,
-  count,
-  active,
-  onOpen,
-  action,
-  children,
-}: {
-  id: string;
-  title: string;
-  count?: number;
-  active?: boolean;
-  onOpen: () => void;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  const [state, setState] = useLocalStorage<"open" | "closed">(`cortex.rail.${id}`, "open");
-  const collapsed = state === "closed";
+function PaperRow({ paper, current }: { paper: PaperMeta; current: boolean }) {
+  const authors = authorsLine(paper.authors, 2);
+  const meta = [paper.year ? String(paper.year) : "", authors].filter(Boolean).join(" · ") || paper.id;
   return (
-    <section className={`rail-section ${collapsed ? "collapsed" : ""}`}>
-      <div className="sec-head" aria-current={active || undefined}>
-        <button
-          className="caret"
-          onClick={() => setState(collapsed ? "open" : "closed")}
-          aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`}
-          aria-expanded={!collapsed}
-        >
-          ▾
-        </button>
-        <button onClick={onOpen} style={{ flex: 1, textAlign: "left", font: "inherit", color: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
-          {title}
-        </button>
-        {action}
-        {typeof count === "number" && <span className="n">{count}</span>}
-      </div>
-      <div className="sec-body">{children}</div>
-    </section>
+    <button
+      className="paper-row"
+      aria-current={current || undefined}
+      onClick={() => navigate({ kind: "paper", id: paper.id })}
+      onMouseEnter={() => prefetchPdf(paper)}
+      onFocus={() => prefetchPdf(paper)}
+      title={paper.title}
+    >
+      <span className="dot" data-status={paper.status} aria-hidden="true" />
+      <span className="t">{paper.title || paper.id}</span>
+      <span className="m">{meta}</span>
+    </button>
   );
 }
 
-function Status<T>({ state, empty }: { state: { loading: boolean; error: string | null; data: T[] | null; reload: () => void }; empty: string }) {
-  if (state.loading && !state.data) return <div className="rail-empty">loading…</div>;
-  if (state.error)
-    return (
-      <div className="rail-empty" title={state.error}>
-        unavailable ·{" "}
-        <button style={{ color: "var(--accent-text)" }} onClick={state.reload}>
-          retry
-        </button>
-      </div>
-    );
-  if (state.data && state.data.length === 0) return <div className="rail-empty">{empty}</div>;
-  return null;
-}
+function AddPaper({ onFiled }: { onFiled: (metas: PaperMeta[]) => void }) {
+  const { toast } = useToast();
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-function SearchIcon() {
+  const add = async (close: () => void) => {
+    const src = detectSource(value);
+    if (!src || busy) return;
+    setBusy(true);
+    try {
+      const meta = await api.library.ingest(src);
+      setValue("");
+      close();
+      onFiled([meta]);
+    } catch (e) {
+      toast(`Could not add: ${errorMessage(e)}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const upload = async (files: FileList | null, close: () => void) => {
+    const list = Array.from(files ?? []);
+    if (list.length === 0 || busy) return;
+    setBusy(true);
+    const out: PaperMeta[] = [];
+    try {
+      for (const f of list) out.push(await api.library.upload(f));
+      close();
+    } catch (e) {
+      toast(`Upload failed: ${errorMessage(e)}`, "error");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+      if (out.length) onFiled(out);
+    }
+  };
+
   return (
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-      <circle cx="11" cy="11" r="7" />
-      <path d="M20 20l-3.5-3.5" />
-    </svg>
+    <Popover
+      up
+      className="add-paper"
+      panelClassName="add-panel"
+      render={(open, toggle) => (
+        <button className="btn sm primary" onClick={toggle} aria-expanded={open} style={{ width: "100%", justifyContent: "center" }}>
+          Add paper
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          <input
+            className="input sm"
+            autoFocus
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void add(close);
+              }
+            }}
+            placeholder="arXiv id, arXiv URL, or any URL"
+            aria-label="Paper source"
+            spellCheck={false}
+            disabled={busy}
+          />
+          <div className="row">
+            <input ref={fileRef} type="file" accept="application/pdf" multiple className="visually-hidden" id="rail-upload" onChange={(e) => void upload(e.target.files, close)} />
+            <label htmlFor="rail-upload" className="btn sm" style={{ cursor: busy ? "wait" : "pointer" }}>
+              Upload PDF
+            </label>
+            <span className="grow" />
+            <button className="btn sm primary" onClick={() => void add(close)} disabled={!detectSource(value) || busy}>
+              {busy ? "Working…" : "Add"}
+            </button>
+          </div>
+        </>
+      )}
+    </Popover>
   );
 }
-function PlusIcon() {
+
+function ArrowIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
+      <path d="M5 12h14M13 6l6 6-6 6" />
     </svg>
   );
 }

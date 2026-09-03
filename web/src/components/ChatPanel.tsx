@@ -1,35 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { api, errorMessage } from "../api";
-import type { AgentId, AgentInfo, Channel, ChatMessage, ModelInfo, ToolTrace } from "../types";
+import type { AgentId, AgentInfo, ChatMessage, ModelInfo, ToolTrace } from "../types";
 import { useAsync, useLocalStorage } from "../lib/hooks";
 import { emitCommand } from "../lib/events";
 import { navigate, parseCortexLink, parseHash } from "../lib/router";
-
-/** What the center pane shows right now, so "this paper" in chat means the one on screen. */
-function openItemContext(): { kind: string; id: string } | undefined {
-  const r = parseHash(location.hash);
-  if (r.kind === "paper") return { kind: "paper", id: r.id };
-  if (r.kind === "note") return { kind: "note", id: r.slug };
-  if (r.kind === "project") return { kind: "project", id: r.slug };
-  if (r.kind === "daily") return { kind: "daily", id: new Date().toISOString().slice(0, 10) };
-  return undefined;
-}
 import { clock, parseDate } from "../lib/format";
 import { MarkdownPreview, handleCortexClick } from "./MarkdownPreview";
 import { ErrorState, Loading } from "./States";
 import { useToast } from "./Toast";
+import { Popover } from "./Popover";
 import type { WebMCPCall } from "../lib/webmcp";
 
-// Spec: channels are general, papers, projects, ideas, daily. Used as a fallback only when
-// GET /api/chat/channels fails, so the panel still works against a partially built server.
-const FALLBACK_CHANNELS: Channel[] = [
-  { id: "general", name: "general", desc: "Anything", count: 0 },
-  { id: "papers", name: "papers", desc: "Library and reading", count: 0 },
-  { id: "projects", name: "projects", desc: "Project verdicts and next actions", count: 0 },
-  { id: "ideas", name: "ideas", desc: "Half-formed thoughts", count: 0 },
-  { id: "daily", name: "daily", desc: "Today", count: 0 },
-];
+/** What the center pane shows right now plus the active space, so "this paper" and "these papers" resolve on the server. */
+function chatContext(space: string): { kind?: string; id?: string; space: string } {
+  const r = parseHash(location.hash);
+  if (r.kind === "paper") return { kind: "paper", id: r.id, space };
+  if (r.kind === "note") return { kind: "note", id: r.slug, space };
+  if (r.kind === "project") return { kind: "project", id: r.slug, space };
+  if (r.kind === "daily") return { kind: "daily", id: new Date().toISOString().slice(0, 10), space };
+  return { space };
+}
 const FALLBACK_MODELS: ModelInfo[] = [
   { id: "glm-5.3", name: "glm-5.3" },
   { id: "glm-5.3-flash", name: "glm-5.3-flash (quick)" },
@@ -60,19 +51,21 @@ interface AgentItem {
 type Item = MsgItem | AgentItem;
 
 interface Props {
+  /** Active space slug, or "all". The chat channel id is the slug ("general" for all), so history is per space. */
+  space: string;
+  spaceName: string;
   focusSignal: number;
   onClose: () => void;
   agentCalls: WebMCPCall[];
   agentReady: boolean;
 }
 
-export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Props) {
+export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, agentReady }: Props) {
   const { toast } = useToast();
-  const [panelTab, setPanelTab] = useLocalStorage<"chat" | "agent">("cortex.chat.tab", "chat");
-  const channels = useAsync(() => api.chat.channels(), []);
+  const [panelTab, setPanelTab] = useState<"chat" | "agent">("chat");
   const models = useAsync(() => api.models(), []);
   const agents = useAsync(() => api.agents.list(), []);
-  const [channel, setChannel] = useLocalStorage<string>("cortex.chat.channel", "general");
+  const channel = space === "all" ? "general" : space;
   const [model, setModel] = useLocalStorage<string>("cortex.chat.model", "glm-5.3");
   const [items, setItems] = useState<Item[]>([]);
   const [loadState, setLoadState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
@@ -84,9 +77,7 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
   const runAborts = useRef(new Map<string, AbortController>());
   const seq = useRef(0);
 
-  const channelList = channels.data && channels.data.length > 0 ? channels.data : channels.error ? FALLBACK_CHANNELS : channels.data ?? [];
   const modelList = models.data && models.data.length > 0 ? models.data : FALLBACK_MODELS;
-  const activeChannel = channelList.find((c) => c.id === channel) ?? channelList[0];
 
   // Load history when the channel changes.
   const loadMessages = useCallback(
@@ -151,7 +142,7 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
 
   const send = async () => {
     const content = draft.trim();
-    if (!content || streaming || !activeChannel) return;
+    if (!content || streaming) return;
     setDraft("");
     const now = new Date().toISOString();
     const userId = `local-u-${++seq.current}`;
@@ -167,8 +158,8 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
     let touchedVault = false;
     try {
       await api.chat.send(
-        activeChannel.id,
-        { content, model, context: openItemContext() },
+        channel,
+        { content, model, context: chatContext(space) },
         (ev) => {
           if (ev.type === "text") {
             patchMsg(asstId, (m) => ({ ...m, msg: { ...m.msg, content: m.msg.content + (ev.delta ?? "") } }));
@@ -196,7 +187,6 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
       const aborted = ac.signal.aborted;
       patchMsg(asstId, (m) => ({ ...m, pending: false, stopped: aborted || m.stopped }));
       setStreaming(null);
-      channels.reload();
       if (touchedVault) emitCommand("vault-changed");
     }
   };
@@ -206,12 +196,10 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
   };
 
   const clearChannel = async () => {
-    if (!activeChannel) return;
-    if (!window.confirm(`Clear all messages in #${activeChannel.name}?`)) return;
+    if (!window.confirm(`Clear the chat history for ${spaceName}?`)) return;
     try {
-      await api.chat.clear(activeChannel.id);
+      await api.chat.clear(channel);
       setItems([]);
-      channels.reload();
     } catch (e) {
       toast(`Clear failed: ${errorMessage(e)}`, "error");
     }
@@ -284,24 +272,54 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
     }
   };
 
+  const canHand = !agentDisabled("codex") || !agentDisabled("opencode");
+  const hasTask = Boolean(draft.trim() || lastAssistant);
+
   return (
     <>
       <div className="chat-head">
         <div className="top">
-          <div className="panel-tabs" role="tablist" aria-label="Panel">
-            <button role="tab" aria-selected={panelTab === "chat"} onClick={() => setPanelTab("chat")}>
-              Chat
-            </button>
-            <button role="tab" aria-selected={panelTab === "agent"} onClick={() => setPanelTab("agent")}>
-              Agent ledger{agentCalls.length > 0 && <span className="n">{agentCalls.length}</span>}
-            </button>
-          </div>
-          <span className="spacer" style={{ flex: 1 }} />
-          {panelTab === "chat" && (
-            <button className="btn ghost sm" onClick={() => void clearChannel()} disabled={!activeChannel || items.length === 0} title="Delete this channel's history">
-              Clear
-            </button>
-          )}
+          <h2 title={space === "all" ? "Chat across all papers" : `Chat in this space (${space})`}>{panelTab === "agent" ? "Agent ledger" : spaceName}</h2>
+          <Popover
+            align="right"
+            render={(open, toggle) => (
+              <button className="icon-btn" onClick={toggle} aria-expanded={open} aria-label="Chat menu" title="Model, agents, history">
+                <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>⋯</span>
+              </button>
+            )}
+          >
+            {(close) => (
+              <>
+                <label className="menu-row">
+                  Model
+                  <select className="select sm" value={model} onChange={(e) => setModel(e.target.value)} title={models.error ? `Model list unavailable: ${models.error}` : "Model"}>
+                    {!modelList.some((m) => m.id === model) && <option value={model}>{model}</option>}
+                    {modelList.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name || m.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="menu-sep" />
+                <button className="menu-item" onClick={() => { handTo("codex"); close(); }} disabled={agentDisabled("codex") || !hasTask} title={agentTitle("codex")}>
+                  Hand to Codex
+                </button>
+                <button className="menu-item" onClick={() => { handTo("opencode"); close(); }} disabled={agentDisabled("opencode") || !hasTask} title={agentTitle("opencode")}>
+                  Hand to OpenCode
+                </button>
+                {canHand && <div className="menu-hint">Uses the draft, or the last reply, as the task</div>}
+                <div className="menu-sep" />
+                <button className="menu-item" onClick={() => { close(); void clearChannel(); }} disabled={items.length === 0}>
+                  Clear history
+                </button>
+                <button className="menu-item" aria-pressed={panelTab === "agent"} onClick={() => { setPanelTab(panelTab === "agent" ? "chat" : "agent"); close(); }}>
+                  <span className="check">{panelTab === "agent" ? "✓" : ""}</span>
+                  Agent ledger
+                </button>
+              </>
+            )}
+          </Popover>
           <button className="icon-btn" onClick={onClose} title="Hide chat (Cmd+/)" aria-label="Hide chat">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 6l12 12M18 6L6 18" />
@@ -310,89 +328,52 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
         </div>
         {panelTab === "agent" && (
           <div className="chat-desc">
-            {agentReady ? "Tools the browser's agent called on this page." : "WebMCP not detected: open in Chrome 149+ with WebMCP or ChatGPT's browser."}
-          </div>
-        )}
-        {panelTab === "chat" && (
-        <div className="channel-tabs" role="tablist" aria-label="Channels">
-          {channels.loading && !channels.data && <span className="chat-desc">loading channels…</span>}
-          {channelList.map((c) => (
-            <button key={c.id} role="tab" aria-selected={activeChannel?.id === c.id} onClick={() => setChannel(c.id)} title={c.desc}>
-              {c.name}
-              {c.count > 0 && <span className="n">{c.count}</span>}
+            {agentReady ? "Tools the browser's agent called on this page." : "WebMCP not detected in this browser."}
+            {" "}
+            <button style={{ color: "var(--accent-text)" }} onClick={() => setPanelTab("chat")}>
+              Back to chat
             </button>
-          ))}
-        </div>
-        )}
-        {panelTab === "chat" && activeChannel?.desc && (
-          <div className="chat-desc">
-            {activeChannel.desc}
-            {channels.error && <span title={channels.error}> · channel list unavailable, using defaults</span>}
           </div>
         )}
       </div>
 
       {panelTab === "agent" && <AgentLedger calls={agentCalls} />}
       {panelTab === "chat" && (
-      <div className="chat-log" ref={logRef} onScroll={onScroll}>
-        {loadState.loading && <Loading label="Loading history" />}
-        {loadState.error && <ErrorState title="History unavailable" error={loadState.error} onRetry={() => loadMessages(channel)} compact />}
-        {!loadState.loading && !loadState.error && items.length === 0 && (
-          <div className="state compact">
-            <h2 style={{ fontSize: "var(--fs-md)" }}>#{activeChannel?.name ?? channel}</h2>
-            <p>Ask about the vault. Replies cite notes and papers with links that open in the center pane.</p>
-          </div>
-        )}
-        {items.map((it) =>
-          it.kind === "msg" ? (
-            <Message key={it.msg.id} item={it} />
-          ) : (
-            <AgentRunBlock key={it.run.id} run={it.run} onStart={(t) => void startRun(it.run.id, t)} onStop={() => stopRun(it.run.id)} onDismiss={() => dismissRun(it.run.id)} />
-          ),
-        )}
-      </div>
+        <div className="chat-log" ref={logRef} onScroll={onScroll}>
+          {loadState.loading && <Loading label="Loading history" />}
+          {loadState.error && <ErrorState title="History unavailable" error={loadState.error} onRetry={() => loadMessages(channel)} compact />}
+          {!loadState.loading && !loadState.error && items.length === 0 && (
+            <div className="state compact">
+              <p>{space === "all" ? "Ask about anything in the vault." : "Ask about the papers in this space."}</p>
+            </div>
+          )}
+          {items.map((it) =>
+            it.kind === "msg" ? (
+              <Message key={it.msg.id} item={it} />
+            ) : (
+              <AgentRunBlock key={it.run.id} run={it.run} onStart={(t) => void startRun(it.run.id, t)} onStop={() => stopRun(it.run.id)} onDismiss={() => dismissRun(it.run.id)} />
+            ),
+          )}
+        </div>
       )}
 
       {panelTab === "chat" && (
-      <div className="composer">
-        <textarea
-          ref={composerRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onComposerKey}
-          placeholder={activeChannel ? `Message #${activeChannel.name}` : "Message"}
-          aria-label="Message"
-          rows={3}
-          disabled={!activeChannel}
-        />
-        <div className="bar">
-          <select className="select sm" value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model" title={models.error ? `Model list unavailable: ${models.error}` : "Model"}>
-            {!modelList.some((m) => m.id === model) && <option value={model}>{model}</option>}
-            {modelList.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name || m.id}
-              </option>
-            ))}
-          </select>
-          <button className="btn sm" onClick={() => handTo("codex")} disabled={agentDisabled("codex") || (!draft.trim() && !lastAssistant)} title={agentTitle("codex")}>
-            Hand to Codex
-          </button>
-          <button className="btn sm" onClick={() => handTo("opencode")} disabled={agentDisabled("opencode") || (!draft.trim() && !lastAssistant)} title={agentTitle("opencode")}>
-            Hand to OpenCode
-          </button>
-          <span className="grow" />
-          {streaming ? (
-            <button className="btn sm danger" onClick={stop}>
-              Stop
-            </button>
-          ) : (
-            <button className="btn sm primary" onClick={() => void send()} disabled={!draft.trim() || !activeChannel}>
-              Send
-            </button>
-          )}
+        <div className="composer">
+          <textarea ref={composerRef} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onComposerKey} placeholder={space === "all" ? "Message" : `Message ${spaceName}`} aria-label="Message" rows={3} />
+          <div className="bar">
+            <span className="hint">Enter sends, Shift+Enter for a new line</span>
+            <span className="grow" />
+            {streaming ? (
+              <button className="btn sm danger" onClick={stop}>
+                Stop
+              </button>
+            ) : (
+              <button className="btn sm primary" onClick={() => void send()} disabled={!draft.trim()}>
+                Send
+              </button>
+            )}
+          </div>
         </div>
-        <span className="hint">Enter sends · Shift+Enter newline · agent buttons use the draft or the last reply as the task</span>
-      </div>
       )}
     </>
   );
@@ -409,8 +390,7 @@ function AgentLedger({ calls }: { calls: WebMCPCall[] }) {
     <div className="chat-log" ref={ref}>
       {calls.length === 0 ? (
         <div className="state compact">
-          <h2 style={{ fontSize: "var(--fs-md)" }}>No agent calls yet</h2>
-          <p>When a browser agent uses this page's tools (search, read, write, file paper, update project), each call is listed here.</p>
+          <p>No agent calls yet.</p>
         </div>
       ) : (
         <div className="ledger" aria-label="Agent tool calls">

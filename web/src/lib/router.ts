@@ -3,18 +3,19 @@ import { useCallback, useEffect, useState } from "react";
 import type { NoteKind } from "../types";
 
 export type Route =
+  | { kind: "home" }
   | { kind: "daily" }
   | { kind: "note"; slug: string }
   | { kind: "paper"; id: string }
   | { kind: "project"; slug: string }
   | { kind: "notes"; noteKind?: NoteKind }
-  | { kind: "library"; status?: string; topic?: string }
-  | { kind: "projects"; status?: string }
   | { kind: "topics" }
   | { kind: "topic"; slug: string };
 
 export function routeToHash(r: Route): string {
   switch (r.kind) {
+    case "home":
+      return "#/";
     case "daily":
       return "#/daily";
     case "note":
@@ -25,15 +26,6 @@ export function routeToHash(r: Route): string {
       return `#/project/${encodeURIComponent(r.slug)}`;
     case "notes":
       return r.noteKind ? `#/notes?kind=${encodeURIComponent(r.noteKind)}` : "#/notes";
-    case "library": {
-      const sp = new URLSearchParams();
-      if (r.status) sp.set("status", r.status);
-      if (r.topic) sp.set("topic", r.topic);
-      const s = sp.toString();
-      return s ? `#/library?${s}` : "#/library";
-    }
-    case "projects":
-      return r.status ? `#/projects?status=${encodeURIComponent(r.status)}` : "#/projects";
     case "topics":
       return "#/topics";
     case "topic":
@@ -49,24 +41,23 @@ export function parseHash(hash: string): Route {
   const head = segs[0] ?? "";
   const rest = segs.slice(1).join("/");
   switch (head) {
+    case "daily":
+      return { kind: "daily" };
     case "note":
       return rest ? { kind: "note", slug: rest } : { kind: "notes" };
     case "paper":
-      return rest ? { kind: "paper", id: rest } : { kind: "library" };
+      return rest ? { kind: "paper", id: rest } : { kind: "home" };
     case "project":
-      return rest ? { kind: "project", slug: rest } : { kind: "projects" };
+      return rest ? { kind: "project", slug: rest } : { kind: "home" };
     case "notes":
       return { kind: "notes", noteKind: (params.get("kind") as NoteKind) || undefined };
-    case "library":
-      return { kind: "library", status: params.get("status") || undefined, topic: params.get("topic") || undefined };
-    case "projects":
-      return { kind: "projects", status: params.get("status") || undefined };
     case "topics":
       return { kind: "topics" };
     case "topic":
       return rest ? { kind: "topic", slug: rest } : { kind: "topics" };
     default:
-      return { kind: "daily" };
+      // Old #/library and #/projects links land on the home view (the rail is the library now).
+      return { kind: "home" };
   }
 }
 

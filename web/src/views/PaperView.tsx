@@ -1,19 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
-import type { PaperDetail, PaperMeta, PaperStatus, Topic } from "../types";
+import { useEffect, useRef, useState } from "react";
+import { api, errorMessage } from "../api";
+import type { PaperDetail, PaperMeta, PaperStatus, Project } from "../types";
 import { PAPER_STATUSES } from "../types";
 import { useAsync, useAutosave, useLocalStorage } from "../lib/hooks";
 import { emitCommand, onCommand } from "../lib/events";
-import { asStringArray } from "../lib/frontmatter";
-import { navigate } from "../lib/router";
-import { authorsLine, relDate, titleCase } from "../lib/format";
+import { authorsLine, titleCase } from "../lib/format";
 import { MarkdownEditor } from "../components/MarkdownEditor";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { ModeSwitch } from "../components/NoteEditor";
 import type { ViewMode } from "../components/NoteEditor";
-import { TopicChips } from "../components/TopicChips";
+import { InlineEdit } from "../components/InlineEdit";
+import { Popover } from "../components/Popover";
 import { ErrorState, Loading, SaveStatus } from "../components/States";
-import { Resizer } from "../components/Resizer";
+import { useToast } from "../components/Toast";
 
 /**
  * The PDF viewer keeps keyboard focus once clicked, so app shortcuts (Cmd+K, Cmd+/, Cmd+N, Cmd+S)
@@ -34,274 +33,182 @@ function forwardShortcutsFromFrame(e: React.SyntheticEvent<HTMLIFrameElement>) {
   }
 }
 
-export function PaperView({ id, topics, refresh }: { id: string; topics: Topic[] | null; refresh: number }) {
+export function PaperView({ id, projects, refresh }: { id: string; projects: Project[] | null; refresh: number }) {
   const paper = useAsync(() => api.library.get(id), [id], [refresh]);
-  if (paper.loading) return <Loading label="Opening paper" />;
+  if (paper.loading && !paper.data) return <Loading label="Opening paper" />;
   if (paper.error) return <ErrorState title="Paper not found" error={paper.error} onRetry={paper.reload} />;
   if (!paper.data) return <ErrorState title="Paper not found" error="Empty response" onRetry={paper.reload} />;
-  return <PaperEditor detail={paper.data} topics={topics} />;
+  return <PaperPage key={id} detail={paper.data} projects={projects ?? []} />;
 }
 
-type MetaDraft = Pick<PaperMeta, "title" | "status" | "rating" | "takeaway" | "topics">;
-
-function PaperEditor({ detail, topics }: { detail: PaperDetail; topics: Topic[] | null }) {
+function PaperPage({ detail, projects }: { detail: PaperDetail; projects: Project[] }) {
+  const { toast } = useToast();
   const id = detail.meta.id;
-  const [tab, setTab] = useState<"pdf" | "notes">("pdf");
+  const [meta, setMeta] = useState<PaperMeta>(detail.meta);
+  const [notesOn, setNotesOn] = useState(false);
   const [mode, setMode] = useLocalStorage<ViewMode>("cortex.paper.mode", "split");
   const [pdfDark, setPdfDark] = useLocalStorage<"on" | "off">("cortex.paper.pdfDark", "on");
 
-  const initialMeta = useMemo<MetaDraft>(
-    () => ({
-      title: detail.meta.title ?? "",
-      status: detail.meta.status ?? "inbox",
-      rating: detail.meta.rating ?? null,
-      takeaway: detail.meta.takeaway ?? "",
-      topics: asStringArray(detail.meta.topics),
-    }),
-    [detail],
-  );
-  const [meta, setMeta] = useState<MetaDraft>(initialMeta);
-  const metaRef = useRef(meta);
+  // Adopt server metadata on background refetches (chat tools, agents).
+  useEffect(() => setMeta(detail.meta), [detail.meta]);
+
+  const patch = async (p: Partial<PaperMeta>) => {
+    setMeta((m) => ({ ...m, ...p }));
+    try {
+      await api.library.update(id, p);
+      emitCommand("vault-changed");
+    } catch (e) {
+      toast(`Save failed: ${errorMessage(e)}`, "error");
+    }
+  };
+
+  // Reading notes: debounced autosave, Cmd+S flushes.
   const [notes, setNotes] = useState(detail.notes ?? "");
   const notesRef = useRef(notes);
-
-  const metaSave = useAutosave<MetaDraft>(async (d) => {
-    await api.library.update(id, d);
-    emitCommand("vault-changed");
-  });
   const notesSave = useAutosave<string>(async (n) => {
     await api.library.update(id, { notes: n });
   });
-  const resetMeta = metaSave.reset;
-  const resetNotes = notesSave.reset;
-  const flushMeta = metaSave.flush;
-  const flushNotes = notesSave.flush;
-
-  const metaStatus = useRef(metaSave.status);
-  metaStatus.current = metaSave.status;
-  const notesStatus = useRef(notesSave.status);
-  notesStatus.current = notesSave.status;
-  const lastId = useRef<string | null>(null);
+  const { flush, status: saveStatus } = notesSave;
+  const saveRef = useRef(saveStatus);
+  saveRef.current = saveStatus;
   useEffect(() => {
-    const same = lastId.current === detail.meta.id;
-    lastId.current = detail.meta.id;
-    const quiet = (s: string) => s === "idle" || s === "saved";
-    if (!same || (quiet(metaStatus.current) && JSON.stringify(metaRef.current) !== JSON.stringify(initialMeta))) {
-      setMeta(initialMeta);
-      metaRef.current = initialMeta;
-      resetMeta();
+    const server = detail.notes ?? "";
+    if ((saveRef.current === "idle" || saveRef.current === "saved") && notesRef.current !== server) {
+      notesRef.current = server;
+      setNotes(server);
     }
-    const serverNotes = detail.notes ?? "";
-    if (!same || (quiet(notesStatus.current) && notesRef.current !== serverNotes)) {
-      setNotes(serverNotes);
-      notesRef.current = serverNotes;
-      resetNotes();
-    }
-  }, [initialMeta, detail, resetMeta, resetNotes]);
-
-  useEffect(
-    () =>
-      onCommand("save", () => {
-        void flushMeta();
-        void flushNotes();
-      }),
-    [flushMeta, flushNotes],
-  );
-
-  const updateMeta = (patch: Partial<MetaDraft>) => {
-    const next = { ...metaRef.current, ...patch };
-    metaRef.current = next;
-    setMeta(next);
-    metaSave.schedule(next);
-  };
+  }, [detail.notes]);
+  useEffect(() => onCommand("save", () => void flush()), [flush]);
   const updateNotes = (n: string) => {
     notesRef.current = n;
     setNotes(n);
     notesSave.schedule(n);
   };
 
-  const m = detail.meta;
-  const arxivUrl = m.arxiv ? `https://arxiv.org/abs/${m.arxiv}` : null;
-  const status: "idle" | "dirty" | "saving" | "saved" | "error" =
-    metaSave.status === "error" || notesSave.status === "error"
-      ? "error"
-      : metaSave.status === "saving" || notesSave.status === "saving"
-        ? "saving"
-        : metaSave.status === "dirty" || notesSave.status === "dirty"
-          ? "dirty"
-          : metaSave.status === "saved" || notesSave.status === "saved"
-            ? "saved"
-            : "idle";
-  const savedAt = [metaSave.savedAt, notesSave.savedAt].filter(Boolean).sort((a, b) => (b as Date).getTime() - (a as Date).getTime())[0] ?? null;
+  const assigned = meta.projects ?? [];
+  const spaceTitle = (slug: string) => String(projects.find((p) => p.slug === slug)?.frontmatter.title ?? slug);
+  const spaceLabel = assigned.length === 0 ? "none" : assigned.length === 1 ? spaceTitle(assigned[0]) : `${spaceTitle(assigned[0])} +${assigned.length - 1}`;
+  const toggleSpace = (slug: string) => {
+    const next = assigned.includes(slug) ? assigned.filter((s) => s !== slug) : [...assigned, slug];
+    void patch({ projects: next });
+  };
+
+  const authors = authorsLine(meta.authors, 4);
+  const arxivUrl = meta.arxiv ? `https://arxiv.org/abs/${meta.arxiv}` : null;
+  const link = meta.link && !arxivUrl ? meta.link : null;
 
   return (
-    <div className="paper">
-      <div className="paper-main">
-        <Resizer cssVar="--meta-w" storageKey="cortex.w.meta" defaultPx={300} min={240} max={560} grows="left" label="Resize paper details" className="at-right" />
-        <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "pdf"} onClick={() => setTab("pdf")}>
-            PDF
-          </button>
-          <button role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>
-            Notes
-          </button>
-          <div className="right">
-            <SaveStatus status={status} savedAt={savedAt} error={metaSave.error ?? notesSave.error} />
-            {tab === "notes" && <ModeSwitch mode={mode} onChange={setMode} />}
-            <button
-              type="button"
-              className="btn sm"
-              title="Open the chat with this paper as context"
-              onClick={() => window.dispatchEvent(new CustomEvent("cortex:ask", { detail: "What is this paper about? Give the core claim, the method, and what I should take from it." }))}
-            >
-              Ask about this paper
-            </button>
-            {tab === "pdf" && (
-              <>
-                <button
-                  type="button"
-                  className="btn ghost sm"
-                  aria-pressed={pdfDark === "on"}
-                  title="Invert the PDF so pages are dark; figures keep their hue"
-                  onClick={() => setPdfDark(pdfDark === "on" ? "off" : "on")}
-                >
-                  {pdfDark === "on" ? "Dark PDF: on" : "Dark PDF: off"}
-                </button>
-                <a className="btn ghost sm" href={api.library.pdfUrl(id)} target="_blank" rel="noopener noreferrer">
-                  Open PDF in tab
-                </a>
-              </>
-            )}
-          </div>
-        </div>
-        {tab === "pdf" ? (
-          <iframe
-            className={`pdf-frame${pdfDark === "on" ? " pdf-dark" : ""}`}
-            src={api.library.pdfUrl(id)}
-            title={`PDF: ${m.title}`}
-            onLoad={forwardShortcutsFromFrame}
-          />
-        ) : (
-          <div className={`paper-notes mode-${mode}`}>
-            {mode !== "preview" && (
-              <div className="editor-col">
-                <MarkdownEditor value={notes} onChange={updateNotes} docKey={`paper:${id}`} placeholder="Reading notes. Math renders in the preview." autoFocus />
-              </div>
-            )}
-            {mode !== "editor" && (
-              <div className="preview-col">
-                <MarkdownPreview source={notes} emptyText="No reading notes yet." />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <aside className="paper-meta" aria-label="Paper metadata">
-        <textarea
-          className="title"
-          value={meta.title ?? ""}
-          rows={3}
-          onChange={(e) => updateMeta({ title: e.target.value })}
-          aria-label="Title"
-        />
-        {authorsLine(m.authors, 12) && <div className="authors">{authorsLine(m.authors, 12)}</div>}
-        <dl className="kv">
-          {m.year ? (
-            <>
-              <dt>year</dt>
-              <dd>{m.year}</dd>
-            </>
-          ) : null}
-          {m.arxiv ? (
-            <>
-              <dt>arxiv</dt>
-              <dd>
-                <a href={arxivUrl ?? "#"} target="_blank" rel="noopener noreferrer">
-                  {m.arxiv}
-                </a>
-              </dd>
-            </>
-          ) : null}
-          {m.link ? (
-            <>
-              <dt>link</dt>
-              <dd>
-                <a href={m.link} target="_blank" rel="noopener noreferrer" title={m.link}>
-                  {m.link.replace(/^https?:\/\//, "")}
-                </a>
-              </dd>
-            </>
-          ) : null}
-          {m.type ? (
-            <>
-              <dt>type</dt>
-              <dd>{m.type}</dd>
-            </>
-          ) : null}
-          {m.pages ? (
-            <>
-              <dt>pages</dt>
-              <dd>{m.pages}</dd>
-            </>
-          ) : null}
-          {m.added ? (
-            <>
-              <dt>added</dt>
-              <dd>{relDate(m.added)}</dd>
-            </>
-          ) : null}
-          <dt>id</dt>
-          <dd title={m.id}>{m.id}</dd>
-        </dl>
-
-        <div className="field">
-          <label htmlFor="pm-status">Status</label>
-          <select id="pm-status" className="select sm" value={meta.status} onChange={(e) => updateMeta({ status: e.target.value as PaperStatus })}>
+    <div className="paper-page">
+      <header className="paper-head">
+        <h1 className="paper-title" title={meta.id}>
+          {meta.title || meta.id}
+        </h1>
+        <div className="paper-line">
+          {authors && (
+            <span className="authors" title={authorsLine(meta.authors, 50)}>
+              {authors}
+            </span>
+          )}
+          {meta.year ? <span className="num">{meta.year}</span> : null}
+          {arxivUrl && (
+            <a href={arxivUrl} target="_blank" rel="noopener noreferrer">
+              arXiv {meta.arxiv}
+            </a>
+          )}
+          {link && (
+            <a href={link} target="_blank" rel="noopener noreferrer" title={link}>
+              link
+            </a>
+          )}
+          <select className="select sm" value={meta.status} onChange={(e) => void patch({ status: e.target.value as PaperStatus })} aria-label="Status">
             {PAPER_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {titleCase(s)}
               </option>
             ))}
           </select>
-        </div>
-
-        <div className="field">
-          <label id="pm-rating">Rating</label>
-          <div className="rating" role="radiogroup" aria-labelledby="pm-rating">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button key={n} type="button" role="radio" aria-checked={meta.rating === n} aria-pressed={meta.rating === n} onClick={() => updateMeta({ rating: meta.rating === n ? null : n })} aria-label={`${n} of 5`}>
-                {n}
+          <Rating value={meta.rating ?? null} onChange={(r) => void patch({ rating: r })} />
+          <Popover
+            render={(open, toggle) => (
+              <button className={`chip-btn ${assigned.length ? "on" : ""}`} onClick={toggle} aria-expanded={open} title="Spaces this paper belongs to">
+                <span className="k">Space:</span>
+                <span className="v">{spaceLabel}</span>
+                <span className="caret">▾</span>
               </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <label htmlFor="pm-takeaway">Takeaway</label>
-          <textarea id="pm-takeaway" className="textarea" rows={4} value={meta.takeaway ?? ""} onChange={(e) => updateMeta({ takeaway: e.target.value })} placeholder="One or two lines: what this paper changes." />
-        </div>
-
-        <div className="field">
-          <label>Topics</label>
-          <TopicChips value={meta.topics} onChange={(t) => updateMeta({ topics: t })} suggestions={topics} />
-        </div>
-
-        {detail.text_preview && (
-          <div className="field">
-            <label>Extracted text</label>
-            <p className="faint" style={{ fontSize: "var(--fs-xs)", lineHeight: 1.45, maxHeight: 160, overflow: "auto" }}>
-              {detail.text_preview}
-            </p>
-          </div>
-        )}
-
-        <div style={{ marginTop: "auto" }}>
-          <button className="btn ghost sm" onClick={() => navigate({ kind: "library", status: meta.status })}>
-            Back to {titleCase(meta.status)}
+            )}
+          >
+            {projects.length === 0 ? (
+              <div className="menu-row">No spaces yet</div>
+            ) : (
+              projects.map((p) => (
+                <button key={p.slug} className="menu-item" role="menuitemcheckbox" aria-checked={assigned.includes(p.slug)} onClick={() => toggleSpace(p.slug)}>
+                  <span className="check">{assigned.includes(p.slug) ? "✓" : ""}</span>
+                  {String(p.frontmatter.title ?? p.slug)}
+                </button>
+              ))
+            )}
+          </Popover>
+          <span className="grow" />
+          {notesOn ? (
+            <>
+              <SaveStatus status={notesSave.status} savedAt={notesSave.savedAt} error={notesSave.error} />
+              <ModeSwitch mode={mode} onChange={setMode} />
+            </>
+          ) : (
+            <button type="button" className="btn ghost sm" aria-pressed={pdfDark === "on"} title="Invert the PDF so pages are dark; figures keep their hue" onClick={() => setPdfDark(pdfDark === "on" ? "off" : "on")}>
+              Dark PDF
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn sm"
+            title="Open the chat with this paper as context"
+            onClick={() => window.dispatchEvent(new CustomEvent("cortex:ask", { detail: "What is this paper about? Give the core claim, the method, and what I should take from it." }))}
+          >
+            Ask about this paper
+          </button>
+          <button type="button" className="btn sm" aria-pressed={notesOn} onClick={() => setNotesOn(!notesOn)} title={notesOn ? "Back to the PDF" : "Reading notes"}>
+            Notes
           </button>
         </div>
-      </aside>
+        <InlineEdit value={meta.takeaway ?? ""} placeholder="One-line takeaway" label="Takeaway" onSave={(v) => void patch({ takeaway: v })} className="takeaway" />
+      </header>
+
+      {notesOn ? (
+        <div className={`paper-notes mode-${mode}`}>
+          {mode !== "preview" && (
+            <div className="editor-col">
+              <MarkdownEditor value={notes} onChange={updateNotes} docKey={`paper:${id}`} placeholder="Reading notes. Math renders in the preview." autoFocus />
+            </div>
+          )}
+          {mode !== "editor" && (
+            <div className="preview-col">
+              <MarkdownPreview source={notes} emptyText="No reading notes yet." />
+            </div>
+          )}
+        </div>
+      ) : (
+        <iframe className={`pdf-frame${pdfDark === "on" ? " pdf-dark" : ""}`} src={api.library.pdfUrl(id)} title={`PDF: ${meta.title}`} onLoad={forwardShortcutsFromFrame} />
+      )}
     </div>
+  );
+}
+
+function Rating({ value, onChange }: { value: number | null; onChange: (r: number | null) => void }) {
+  return (
+    <span className="rating" role="radiogroup" aria-label="Rating">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          role="radio"
+          aria-checked={value === n}
+          className={value != null && n <= value ? "on" : ""}
+          onClick={() => onChange(value === n ? null : n)}
+          aria-label={`${n} of 5`}
+          title={`${n} of 5`}
+        />
+      ))}
+    </span>
   );
 }

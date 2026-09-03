@@ -1,26 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "./api";
 import { NOTE_KINDS } from "./types";
-import type { NoteKind } from "./types";
+import type { NoteKind, PaperMeta } from "./types";
 import { useRoute } from "./lib/router";
 import { navigate } from "./lib/router";
 import { useAsync, useLocalStorage } from "./lib/hooks";
 import { emitCommand, onCommand } from "./lib/events";
 import { useTheme } from "./lib/theme";
-import { installWebMCP, onWebMCPCall } from "./lib/webmcp";
+import { installWebMCP, onWebMCPCall, webmcpTools } from "./lib/webmcp";
 import type { WebMCPCall } from "./lib/webmcp";
 import { Sidebar } from "./components/Sidebar";
 import { ChatPanel } from "./components/ChatPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { PromptDialog } from "./components/Dialog";
 import { ToastProvider, useToast } from "./components/Toast";
+import { EmptyState } from "./components/States";
 import { NoteView } from "./views/NoteView";
 import { DailyView } from "./views/DailyView";
 import { PaperView } from "./views/PaperView";
 import { ProjectView } from "./views/ProjectView";
 import { NotesList } from "./views/NotesList";
-import { LibraryList } from "./views/LibraryList";
-import { ProjectsList } from "./views/ProjectsList";
 import { TopicsList, TopicView } from "./views/TopicsView";
 import { Resizer } from "./components/Resizer";
 
@@ -38,8 +37,9 @@ function Shell() {
   const [themePref, setThemePref] = useTheme();
   const [chatPref, setChatPref] = useLocalStorage<"open" | "closed">("cortex.chat", "open");
   const chatOpen = chatPref === "open";
+  const [spacePref, setSpacePref] = useLocalStorage<string>("cortex.space", "all");
   const [palette, setPalette] = useState(false);
-  const [prompt, setPrompt] = useState<null | "note" | "project">(null);
+  const [prompt, setPrompt] = useState<null | "note" | "space">(null);
   const [newKind, setNewKind] = useState<NoteKind>("fleeting");
   const [chatFocus, setChatFocus] = useState(0);
 
@@ -62,6 +62,15 @@ function Shell() {
   }, []);
 
   const topics = useAsync(() => api.topics(), [], [vaultTick]);
+  const projects = useAsync(() => api.projects.list(), [], [vaultTick]);
+
+  // The active space: a project slug or "all". A slug that no longer exists falls back to all.
+  const space = useMemo(() => {
+    if (spacePref === "all" || !projects.data) return spacePref;
+    return projects.data.some((p) => p.slug === spacePref) ? spacePref : "all";
+  }, [spacePref, projects.data]);
+  const spaceProject = useMemo(() => projects.data?.find((p) => p.slug === space) ?? null, [projects.data, space]);
+  const spaceName = space === "all" ? "All papers" : String(spaceProject?.frontmatter.title ?? space);
 
   const toggleChat = useCallback(() => {
     setChatPref(chatOpen ? "closed" : "open");
@@ -69,7 +78,26 @@ function Shell() {
   }, [chatOpen, setChatPref]);
 
   const openNewNote = useCallback(() => setPrompt("note"), []);
-  const openNewProject = useCallback(() => setPrompt("project"), []);
+  const openNewSpace = useCallback(() => setPrompt("space"), []);
+
+  // A paper added while a space is active joins that space.
+  const onFiled = useCallback(
+    async (metas: PaperMeta[]) => {
+      if (space !== "all") {
+        for (const m of metas) {
+          try {
+            await api.library.update(m.id, { projects: Array.from(new Set([...(m.projects ?? []), space])) });
+          } catch {
+            /* the paper is filed; the space link can be set from its header */
+          }
+        }
+      }
+      emitCommand("vault-changed");
+      toast(metas.length === 1 ? "Filed 1 paper" : `Filed ${metas.length} papers`);
+      if (metas[0]) navigate({ kind: "paper", id: metas[0].id });
+    },
+    [space, toast],
+  );
 
   // Drop PDFs anywhere: upload each, file it, open the first. Drops inside the note editor are handled there.
   const [dropping, setDropping] = useState(false);
@@ -97,23 +125,14 @@ function Shell() {
     const arxiv = text.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/)?.[1];
     if (!files.length && !arxiv) return;
     e.preventDefault();
-    let first: string | null = null;
-    let n = 0;
+    const metas: PaperMeta[] = [];
     try {
-      if (arxiv) {
-        const m = await api.library.ingest({ arxiv });
-        first = m.id; n += 1;
-      }
-      for (const f of files) {
-        const m = await api.library.upload(f);
-        first = first ?? m.id; n += 1;
-      }
-      emitCommand("vault-changed");
-      toast(n === 1 ? "Filed 1 paper" : `Filed ${n} papers`);
-      if (first) navigate({ kind: "paper", id: first });
+      if (arxiv) metas.push(await api.library.ingest({ arxiv }));
+      for (const f of files) metas.push(await api.library.upload(f));
     } catch (err) {
       toast(errorMessage(err), "error");
     }
+    if (metas.length) void onFiled(metas);
   };
 
   // The inbox folder (~/Cortex/inbox) is filed by the server; notice new papers and refresh.
@@ -157,7 +176,7 @@ function Shell() {
         e.preventDefault();
         setPalette(true);
       } else if (k === "n" && !e.shiftKey) {
-        // Note: browsers may reserve Cmd+N; Ctrl+N and the palette/button paths always work.
+        // Note: browsers may reserve Cmd+N; Ctrl+N and the palette path always work.
         e.preventDefault();
         setPrompt("note");
       } else if (k === "s") {
@@ -179,11 +198,12 @@ function Shell() {
     emitCommand("vault-changed");
     navigate({ kind: "note", slug: note.slug });
   };
-  const createProject = async (title: string) => {
+  const createSpace = async (title: string) => {
     try {
       const p = await api.projects.create({ title, status: "active", type: "research" });
       setPrompt(null);
       emitCommand("vault-changed");
+      setSpacePref(p.slug);
       navigate({ kind: "project", slug: p.slug });
     } catch (e) {
       toast(errorMessage(e), "error");
@@ -193,6 +213,9 @@ function Shell() {
 
   let view: JSX.Element;
   switch (route.kind) {
+    case "home":
+      view = spaceProject ? <ProjectView slug={spaceProject.slug} refresh={vaultTick} /> : <EmptyState title="Pick a paper on the left, or add one." />;
+      break;
     case "daily":
       view = <DailyView topics={topics.data} refresh={vaultTick} />;
       break;
@@ -200,19 +223,13 @@ function Shell() {
       view = <NoteView slug={route.slug} topics={topics.data} refresh={vaultTick} />;
       break;
     case "paper":
-      view = <PaperView id={route.id} topics={topics.data} refresh={vaultTick} />;
+      view = <PaperView id={route.id} projects={projects.data} refresh={vaultTick} />;
       break;
     case "project":
-      view = <ProjectView slug={route.slug} topics={topics.data} refresh={vaultTick} />;
+      view = <ProjectView slug={route.slug} refresh={vaultTick} />;
       break;
     case "notes":
       view = <NotesList noteKind={route.noteKind} onNewNote={openNewNote} refresh={vaultTick} />;
-      break;
-    case "library":
-      view = <LibraryList status={route.status} topic={route.topic} refresh={vaultTick} />;
-      break;
-    case "projects":
-      view = <ProjectsList status={route.status} onNewProject={openNewProject} refresh={vaultTick} />;
       break;
     case "topics":
       view = <TopicsList topics={topics.data} loading={topics.loading} error={topics.error} reload={topics.reload} />;
@@ -232,32 +249,37 @@ function Shell() {
     >
       {dropping && (
         <div className="drop-overlay" aria-hidden="true">
-          <div className="drop-card">Drop PDFs to file them in the library</div>
+          <div className="drop-card">{space === "all" ? "Drop PDFs to file them" : `Drop PDFs to file them in ${spaceName}`}</div>
         </div>
       )}
       <Sidebar
         route={route}
+        space={space}
+        projects={projects.data}
+        onSpace={setSpacePref}
+        onNewSpace={openNewSpace}
+        onFiled={(metas) => void onFiled(metas)}
+        refresh={vaultTick}
         chatOpen={chatOpen}
         onToggleChat={toggleChat}
         onOpenPalette={() => setPalette(true)}
-        onNewNote={openNewNote}
         themePref={themePref}
         onTheme={setThemePref}
         agentReady={agentReady}
-        agentToolCount={10}
+        agentToolCount={webmcpTools.length}
       />
       <main className="center" aria-live="polite">
-        <Resizer cssVar="--rail-w" storageKey="cortex.w.rail" defaultPx={250} min={180} max={480} grows="right" label="Resize sidebar" className="at-left" />
+        <Resizer cssVar="--rail-w" storageKey="cortex.w.rail" defaultPx={260} min={200} max={480} grows="right" label="Resize papers" className="at-left" />
         {view}
         {chatOpen && (
           <Resizer cssVar="--chat-w" storageKey="cortex.w.chat" defaultPx={380} min={300} max={760} grows="left" label="Resize chat" className="at-right" />
         )}
       </main>
       <aside className="chat" aria-label="Chat" hidden={!chatOpen}>
-        <ChatPanel focusSignal={chatFocus} onClose={toggleChat} agentCalls={agentCalls} agentReady={agentReady} />
+        <ChatPanel space={space} spaceName={spaceName} focusSignal={chatFocus} onClose={toggleChat} agentCalls={agentCalls} agentReady={agentReady} />
       </aside>
 
-      <SearchPalette open={palette} onClose={() => setPalette(false)} onNewNote={openNewNote} />
+      <SearchPalette open={palette} onClose={() => setPalette(false)} onNewNote={openNewNote} onNewSpace={openNewSpace} projects={projects.data} space={space} />
       {prompt === "note" && (
         <PromptDialog
           title="New note"
@@ -279,7 +301,7 @@ function Shell() {
           }
         />
       )}
-      {prompt === "project" && <PromptDialog title="New project" label="Title" placeholder="Project name" onSubmit={createProject} onClose={() => setPrompt(null)} />}
+      {prompt === "space" && <PromptDialog title="New space" label="Name" placeholder="Space name" onSubmit={createSpace} onClose={() => setPrompt(null)} />}
     </div>
   );
 }

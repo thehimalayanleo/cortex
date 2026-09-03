@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { api, errorMessage } from "../api";
-import type { SearchHit, SearchType } from "../types";
+import type { Project, SearchHit, SearchType } from "../types";
 import { navigate } from "../lib/router";
 import type { Route } from "../lib/router";
 import { useDebouncedValue } from "../lib/hooks";
@@ -11,6 +11,9 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onNewNote: () => void;
+  onNewSpace: () => void;
+  projects: Project[] | null;
+  space: string;
 }
 
 interface Item {
@@ -22,7 +25,7 @@ interface Item {
   run: () => void;
 }
 
-const GROUP_LABEL: Record<SearchType, string> = { note: "Notes", paper: "Library", project: "Projects" };
+const GROUP_LABEL: Record<SearchType, string> = { note: "Notes", paper: "Papers", project: "Spaces" };
 const GROUP_ORDER: SearchType[] = ["note", "paper", "project"];
 
 function hitRoute(h: SearchHit): Route {
@@ -38,7 +41,7 @@ function snippetHtml(s: string): string {
   return esc.replace(/&lt;(\/?)(mark|b)&gt;/gi, "<$1mark>");
 }
 
-export function SearchPalette({ open, onClose, onNewNote }: Props) {
+export function SearchPalette({ open, onClose, onNewNote, onNewSpace, projects, space }: Props) {
   const [q, setQ] = useState("");
   const dq = useDebouncedValue(q.trim(), 150);
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -101,6 +104,13 @@ export function SearchPalette({ open, onClose, onNewNote }: Props) {
         close();
         navigate(r);
       };
+      const spaceItems: Item[] = (projects ?? []).map((p) => ({
+        key: `space:${p.slug}`,
+        title: String(p.frontmatter.title ?? p.slug),
+        group: "Spaces",
+        hint: p.slug === space ? "active" : String(p.frontmatter.status ?? ""),
+        run: go({ kind: "project", slug: p.slug }),
+      }));
       return [
         { key: "today", title: "Today", group: "Go to", hint: "daily note", run: go({ kind: "daily" }) },
         {
@@ -114,9 +124,17 @@ export function SearchPalette({ open, onClose, onNewNote }: Props) {
           },
         },
         { key: "notes", title: "All notes", group: "Go to", run: go({ kind: "notes" }) },
-        { key: "library", title: "Library", group: "Go to", run: go({ kind: "library" }) },
-        { key: "projects", title: "Projects", group: "Go to", run: go({ kind: "projects" }) },
+        {
+          key: "new-space",
+          title: "New space",
+          group: "Go to",
+          run: () => {
+            close();
+            onNewSpace();
+          },
+        },
         { key: "topics", title: "Topics", group: "Go to", run: go({ kind: "topics" }) },
+        ...spaceItems,
         ...themeItems,
       ];
     }
@@ -145,7 +163,7 @@ export function SearchPalette({ open, onClose, onNewNote }: Props) {
       out.push({ key: `${h.type}:${h.id}`, title: h.title || h.id, snippet: h.snippet, group: String(h.type), run: () => { close(); navigate(hitRoute(h)); } });
     }
     return out;
-  }, [dq, hits, onClose, onNewNote]);
+  }, [dq, hits, onClose, onNewNote, onNewSpace, projects, space]);
 
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
@@ -177,7 +195,7 @@ export function SearchPalette({ open, onClose, onNewNote }: Props) {
         <input
           ref={input}
           className="palette-input"
-          placeholder="Search notes, papers, projects…"
+          placeholder="Search papers, notes, spaces…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKey}

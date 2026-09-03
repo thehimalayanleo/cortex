@@ -72,6 +72,7 @@ export interface PaperMeta {
   rating?: number | null;
   takeaway?: string | null;
   topics: string[];
+  projects?: string[]; // spaces this paper belongs to (project slugs)
   added?: string | null;
   pages?: number | null;
   source_path?: string | null;

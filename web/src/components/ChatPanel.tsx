@@ -4,7 +4,17 @@ import { api, errorMessage } from "../api";
 import type { AgentId, AgentInfo, Channel, ChatMessage, ModelInfo, ToolTrace } from "../types";
 import { useAsync, useLocalStorage } from "../lib/hooks";
 import { emitCommand } from "../lib/events";
-import { navigate, parseCortexLink } from "../lib/router";
+import { navigate, parseCortexLink, parseHash } from "../lib/router";
+
+/** What the center pane shows right now, so "this paper" in chat means the one on screen. */
+function openItemContext(): { kind: string; id: string } | undefined {
+  const r = parseHash(location.hash);
+  if (r.kind === "paper") return { kind: "paper", id: r.id };
+  if (r.kind === "note") return { kind: "note", id: r.slug };
+  if (r.kind === "project") return { kind: "project", id: r.slug };
+  if (r.kind === "daily") return { kind: "daily", id: new Date().toISOString().slice(0, 10) };
+  return undefined;
+}
 import { clock, parseDate } from "../lib/format";
 import { MarkdownPreview, handleCortexClick } from "./MarkdownPreview";
 import { ErrorState, Loading } from "./States";
@@ -146,7 +156,7 @@ export function ChatPanel({ focusSignal, onClose, agentCalls, agentReady }: Prop
     try {
       await api.chat.send(
         activeChannel.id,
-        { content, model },
+        { content, model, context: openItemContext() },
         (ev) => {
           if (ev.type === "text") {
             patchMsg(asstId, (m) => ({ ...m, msg: { ...m.msg, content: m.msg.content + (ev.delta ?? "") } }));

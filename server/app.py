@@ -231,6 +231,7 @@ def search(q: str, limit: int = 20):
 class ChatIn(BaseModel):
     content: str
     model: str | None = None
+    context: dict[str, Any] | None = None  # what is open in the app: {kind: note|paper|project|daily, id, title}
 
 
 @app.get("/api/chat/channels")
@@ -258,7 +259,7 @@ def chat_clear(channel: str):
 def chat_post(channel: str, m: ChatIn):
     if not m.content.strip():
         raise HTTPException(400, "empty message")
-    return _sse(chat.stream(channel, m.content.strip(), m.model))
+    return _sse(chat.stream(channel, m.content.strip(), m.model, m.context))
 
 
 # ---------------------------------------------------------------- agents

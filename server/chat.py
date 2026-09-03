@@ -166,12 +166,31 @@ def system_prompt(channel: str) -> str:
     )
 
 
-def stream(channel: str, content: str, model: str | None = None) -> Iterator[dict]:
+def _context_line(ctx: dict | None) -> str:
+    """Describe what the user has open so 'this paper' / 'this note' resolve to it."""
+    if not ctx or not ctx.get("kind"):
+        return ""
+    kind, cid, title = str(ctx.get("kind")), str(ctx.get("id") or ""), str(ctx.get("title") or "")
+    if kind == "paper" and cid:
+        p = vault.get_paper(cid)
+        if p:
+            m = p["meta"]
+            return (f"\nOPEN IN THE APP RIGHT NOW: paper {cid} \"{m.get('title','')}\" ({m.get('authors','')}, {m.get('year','')}), "
+                    f"status {m.get('status')}, takeaway: {m.get('takeaway') or 'none'}. When the user says 'this paper' they mean it; "
+                    f"call read_paper(\"{cid}\") for its text. Link: cortex://paper/{cid}")
+    if kind in ("note", "daily") and cid:
+        return f"\nOPEN IN THE APP RIGHT NOW: note \"{title or cid}\" (slug {cid}). 'This note' means it; call read_note(\"{cid}\") for the body. Link: cortex://note/{cid}"
+    if kind == "project" and cid:
+        return f"\nOPEN IN THE APP RIGHT NOW: project \"{title or cid}\" (slug {cid}). 'This project' means it. Link: cortex://project/{cid}"
+    return ""
+
+
+def stream(channel: str, content: str, model: str | None = None, context: dict | None = None) -> Iterator[dict]:
     model = model or DEFAULT_MODEL
     history = vault.read_chat(channel, limit=40)
     user_msg = {"id": uuid.uuid4().hex, "role": "user", "content": content, "ts": int(time.time() * 1000)}
     vault.append_chat(channel, user_msg)
-    messages: list[dict] = [{"role": "system", "content": system_prompt(channel)}]
+    messages: list[dict] = [{"role": "system", "content": system_prompt(channel) + _context_line(context)}]
     for m in history[-16:]:
         if m.get("content"):
             messages.append({"role": m["role"], "content": m["content"][:6000]})

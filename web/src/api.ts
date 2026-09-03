@@ -161,7 +161,12 @@ export const api = {
     channels: () => request<Channel[]>("/chat/channels"),
     messages: (channel: string) => request<ChatMessage[]>(`/chat/${encodeURIComponent(channel)}`),
     clear: (channel: string) => request<void>(`/chat/${encodeURIComponent(channel)}`, { method: "DELETE" }),
-    send: (channel: string, data: { content: string; model?: string }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) =>
+    send: (
+      channel: string,
+      data: { content: string; model?: string; context?: { kind: string; id: string; title?: string } },
+      onEvent: (e: ChatEvent) => void,
+      signal?: AbortSignal,
+    ) =>
       stream<ChatEvent>(`/chat/${encodeURIComponent(channel)}`, data, onEvent, signal),
   },
 

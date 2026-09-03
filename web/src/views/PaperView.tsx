@@ -15,6 +15,25 @@ import { TopicChips } from "../components/TopicChips";
 import { ErrorState, Loading, SaveStatus } from "../components/States";
 import { Resizer } from "../components/Resizer";
 
+/**
+ * The PDF viewer keeps keyboard focus once clicked, so app shortcuts (Cmd+K, Cmd+/, Cmd+N, Cmd+S)
+ * never reach the page. The frame is same-origin, so re-dispatch those chords on the parent window.
+ */
+function forwardShortcutsFromFrame(e: React.SyntheticEvent<HTMLIFrameElement>) {
+  try {
+    const win = e.currentTarget.contentWindow;
+    if (!win) return;
+    win.addEventListener("keydown", (ke) => {
+      const mod = ke.metaKey || ke.ctrlKey;
+      if (!mod || !["k", "n", "s", "/"].includes(ke.key.toLowerCase())) return;
+      ke.preventDefault();
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: ke.key, metaKey: ke.metaKey, ctrlKey: ke.ctrlKey, shiftKey: ke.shiftKey, bubbles: true, cancelable: true }));
+    });
+  } catch {
+    /* cross-origin or plugin frame: nothing to forward */
+  }
+}
+
 export function PaperView({ id, topics, refresh }: { id: string; topics: Topic[] | null; refresh: number }) {
   const paper = useAsync(() => api.library.get(id), [id], [refresh]);
   if (paper.loading) return <Loading label="Opening paper" />;
@@ -148,7 +167,12 @@ function PaperEditor({ detail, topics }: { detail: PaperDetail; topics: Topic[] 
           </div>
         </div>
         {tab === "pdf" ? (
-          <iframe className={`pdf-frame${pdfDark === "on" ? " pdf-dark" : ""}`} src={api.library.pdfUrl(id)} title={`PDF: ${m.title}`} />
+          <iframe
+            className={`pdf-frame${pdfDark === "on" ? " pdf-dark" : ""}`}
+            src={api.library.pdfUrl(id)}
+            title={`PDF: ${m.title}`}
+            onLoad={forwardShortcutsFromFrame}
+          />
         ) : (
           <div className={`paper-notes mode-${mode}`}>
             {mode !== "preview" && (

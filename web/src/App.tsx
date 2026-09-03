@@ -92,8 +92,9 @@ function Shell() {
         toggleChat();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase so editors and embedded frames can't swallow the shortcut first.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [toggleChat]);
 
   const createNote = async (title: string) => {

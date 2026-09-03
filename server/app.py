@@ -35,7 +35,12 @@ def _watch_inbox(folder: Path) -> None:
                     seen[key] = mtime
                     continue
                 try:
-                    vault.ingest_pdf(f, {}, move=True)
+                    m = vault.ingest_pdf(f, {}, move=True)
+                    if f.exists():  # already in the library under this id: the vault copy wins, drop the duplicate
+                        f.unlink()
+                        print(f"inbox: {f.name} is already filed as {m.get('id')}; removed the duplicate")
+                    else:
+                        print(f"inbox: filed {f.name} as {m.get('id')}")
                 except Exception as e:  # keep the watcher alive; a bad file just stays put
                     print("inbox: could not ingest", f.name, e)
                     (folder / (f.name + ".failed")).write_text(str(e))

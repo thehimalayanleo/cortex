@@ -118,15 +118,25 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh", "modal"]}, "args": {"type": "string"}}, "required": ["code"]}}},
     {"type": "function", "function": {"name": "shell", "description": "Run one shell command in the Lab terminal on the user's GPU box (executor ssh, default; cwd ~/cortex-lab, the lab venv on PATH) or this machine (local), and open it so the user sees the output stream. Examples: nvidia-smi, ls out, python recipes/pretrain_nano.py --smoke. Only when the user asks to run a command; never destructive commands without an explicit request.",
         "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh"]}}, "required": ["cmd"]}}},
-    {"type": "function", "function": {"name": "studio_board", "description": "The Studio: the logline, the shot list with status (planned|rendering|rendered|approved|reshoot), each shot's takes with critic scores (identity_mean/min, flicker) and verdicts, and available keyframe assets.",
+    {"type": "function", "function": {"name": "studio_board", "description": "The Studio: the logline, the shot list with status (planned|rendering|rendered|approved|reshoot), each shot's takes with critic scores (identity_mean/min, flicker) and verdicts, keyframe assets, the character bible, and the scenes (ordered shots, filler|full, assembled video).",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "plan_shots", "description": "Director: turn a logline into n planned shots (title, image-to-video prompt, notes) added to the Studio board. Only when the user asks to plan or storyboard.",
         "parameters": {"type": "object", "properties": {"logline": {"type": "string"}, "n": {"type": "integer"}}, "required": ["logline"]}}},
-    {"type": "function", "function": {"name": "set_shot", "description": "Edit a shot: prompt, keyframe (an asset name from studio_board or a path on the GPU box like ~/celwright_v3b/hero_v3.png), frames, size, status, or a director_note. Or add one with add=true and a title.",
-        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "add": {"type": "boolean"}, "title": {"type": "string"}, "prompt": {"type": "string"}, "keyframe": {"type": "string"}, "frames": {"type": "integer"}, "size": {"type": "string"}, "status": {"type": "string"}, "director_note": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "set_shot", "description": "Edit a shot: prompt, keyframe (an asset name from studio_board or a path on the GPU box like ~/celwright_v3b/hero_v3.png), character (an id from list_characters; without a keyframe the render uses its hero image and hero set), frames, size, status, or a director_note. Or add one with add=true and a title.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "add": {"type": "boolean"}, "title": {"type": "string"}, "prompt": {"type": "string"}, "keyframe": {"type": "string"}, "character": {"type": "string"}, "frames": {"type": "integer"}, "size": {"type": "string"}, "status": {"type": "string"}, "director_note": {"type": "string"}}}}},
     {"type": "function", "function": {"name": "render_shot", "description": "Render a take of a shot on the GPU box (Wan 2.2 image-to-video from its keyframe; about a minute for 49 frames) and open the run so the user watches. Without a keyframe, or off the GPU box, it runs the smoke brick. Then call refresh_shot to pull the clip, contact sheet, and the critics' verdict.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "executor": {"type": "string", "enum": ["ssh", "local"]}, "smoke": {"type": "boolean"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "refresh_shot", "description": "After a take finishes: fetch its artifacts into the vault and update the shot's status from the critics' verdict (keep -> rendered, else reshoot). Returns the shot with its takes.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}},
+    {"type": "function", "function": {"name": "list_characters", "description": "The Studio's character bible: each character's id, name, description (identity text), hero image, hero set and LoRA folders on the GPU box, build status and prototype scores (proto_mean/min, p_own).",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "build_character", "description": "Build a character on the GPU box with the identity brick: stage hero (the hero image from its description), heroset (framings of the hero; the identity prototype), or lora (a character LoRA on the hero set). Opens the run. add=true with name and description creates the character first. Off the box it runs the smoke brick.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "stage": {"type": "string", "enum": ["hero", "heroset", "lora"]}, "add": {"type": "boolean"}, "name": {"type": "string"}, "description": {"type": "string"}, "style": {"type": "string"}, "executor": {"type": "string", "enum": ["ssh", "local"]}, "smoke": {"type": "boolean"}}}}},
+    {"type": "function", "function": {"name": "plan_scene", "description": "Director: plan a scene from a logline and add its shots to the board. kind filler = 2 to 4 short b-roll shots (17 to 33 frames) for post-production cutaways; kind full = n shots with dialogue lines and continuity notes. characters: ids from list_characters to cast. Only when the user asks for a scene.",
+        "parameters": {"type": "object", "properties": {"logline": {"type": "string"}, "kind": {"type": "string", "enum": ["filler", "full"]}, "n": {"type": "integer"}, "characters": {"type": "array", "items": {"type": "string"}}, "set_name": {"type": "string"}}, "required": ["logline"]}}},
+    {"type": "function", "function": {"name": "render_scene", "description": "Render every shot of a scene in order on the GPU box, one take at a time (each about a minute), then mark the scene rendered. only_missing skips shots already rendered or approved. Then assemble_scene.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "smoke": {"type": "boolean"}, "only_missing": {"type": "boolean"}}, "required": ["id"]}}},
+    {"type": "function", "function": {"name": "assemble_scene", "description": "Concatenate the latest kept take of each shot of a scene into scene.mp4 with ffmpeg (here) and a contact strip; returns the scene with its video path and any shots still missing a clip.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "collect", "description": "Save a trace to the user's long-term data collector (for future post-training): kind note|preference|pair|rating|decision|taste|feedback|idea|link; content; tags; for a preference give chosen and rejected (and prompt); for a pair give prompt and response. Use whenever the user says 'remember this', 'collect this', 'I prefer', 'log this', or shows a taste worth keeping.",
         "parameters": {"type": "object", "properties": {"kind": {"type": "string"}, "content": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "context": {"type": "string"}, "prompt": {"type": "string"}, "response": {"type": "string"}, "chosen": {"type": "string"}, "rejected": {"type": "string"}, "rating": {"type": "number"}}}}},
@@ -396,10 +406,34 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
     if name == "set_shot":
         from . import studio
         if a.get("add"):
-            sh = studio.add_shot(str(a.get("title") or "Shot"), str(a.get("prompt") or ""), a.get("keyframe"), int(a.get("frames") or 49), str(a.get("size") or "832x480"))
+            sh = studio.add_shot(str(a.get("title") or "Shot"), str(a.get("prompt") or ""), a.get("keyframe"), int(a.get("frames") or 49), str(a.get("size") or "832x480"), character=a.get("character"))
         else:
-            sh = studio.update_shot(str(a["id"]), {k: a.get(k) for k in ("title", "prompt", "keyframe", "frames", "size", "status", "director_note")})
+            sh = studio.update_shot(str(a["id"]), {k: a.get(k) for k in ("title", "prompt", "keyframe", "frames", "size", "status", "director_note", "character")})
         return sh, f"shot {sh['id']}", "cortex://lab/studio"
+    if name == "list_characters":
+        from . import studio
+        cs = studio.list_characters()
+        return cs, f"{len(cs)} characters", "cortex://lab/studio"
+    if name == "build_character":
+        from . import studio
+        cid = a.get("id")
+        if a.get("add") or not cid:
+            c = studio.add_character(str(a.get("name") or "Character"), str(a.get("description") or ""), str(a.get("style") or ""))
+            cid = c["id"]
+        m = studio.build_character(str(cid), str(a.get("stage") or "heroset"), a.get("executor"), a.get("smoke"), origin="chat:build_character")
+        return m, f"{a.get('stage') or 'heroset'} of {cid} on {m['executor']} · {m['id']}", f"cortex://lab/run/{m['id']}"
+    if name == "plan_scene":
+        from . import studio
+        sc = studio.plan_scene(str(a["logline"]), str(a.get("kind") or "filler"), a.get("n"), a.get("characters"), str(a.get("set_name") or ""))
+        return sc, f"{sc['kind']} scene {sc['id']} · {len(sc['shots'])} shots", "cortex://lab/studio"
+    if name == "render_scene":
+        from . import studio
+        sc = studio.render_scene(str(a["id"]), None, a.get("smoke"), origin="chat:render_scene", only_missing=bool(a.get("only_missing")))
+        return sc, f"rendering scene {sc['id']} · {len(sc['shots'])} shots", "cortex://lab/studio"
+    if name == "assemble_scene":
+        from . import studio
+        sc = studio.assemble_scene(str(a["id"]))
+        return sc, f"assembled {sc['id']} · {sc['clips']} clips" + (f", {len(sc['missing'])} missing" if sc["missing"] else ""), "cortex://lab/studio"
     if name == "render_shot":
         from . import studio
         m = studio.render(str(a["id"]), a.get("executor"), a.get("smoke"), origin="chat:render_shot")
@@ -430,7 +464,7 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
     raise ValueError(f"unknown tool {name}")
 
 
-WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code", "shell", "lab_plan_add", "lab_plan_remove", "gpu_benchmark", "plan_shots", "set_shot", "render_shot", "refresh_shot", "collect"}
+WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code", "shell", "lab_plan_add", "lab_plan_remove", "gpu_benchmark", "plan_shots", "set_shot", "render_shot", "refresh_shot", "build_character", "plan_scene", "render_scene", "assemble_scene", "collect"}
 
 
 def system_prompt(channel: str) -> str:
@@ -469,7 +503,7 @@ def _context_line(ctx: dict | None) -> str:
         where = f"station '{cid}'" if cid else "the overview"
         return (f"\nOPEN IN THE APP RIGHT NOW: the Training Lab, {where}. The lab has in-browser stations (data, pretrain, midtrain, posttrain, encoder, cluster, paint) "
                 "that train a tiny transformer with tf.js, 15 teaching chapters (list_lab_chapters, then read_note on a slug like lab-05-preference-and-rl), "
-                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot), a data collector (collect, list_traces), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
+                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot; characters: list_characters, build_character; scenes: plan_scene, render_scene, assemble_scene), a data collector (collect, list_traces), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
                 "Link: cortex://lab")
     return ""
 

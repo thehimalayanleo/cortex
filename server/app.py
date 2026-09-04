@@ -581,6 +581,7 @@ class ShotIn(BaseModel):
     frames: int | None = 49
     size: str | None = "832x480"
     notes: str | None = None
+    character: str | None = None
 
 
 class ShotPatch(BaseModel):
@@ -592,6 +593,7 @@ class ShotPatch(BaseModel):
     notes: str | None = None
     status: str | None = None
     director_note: str | None = None
+    character: str | None = None
 
 
 class PlanIn(BaseModel):
@@ -626,7 +628,7 @@ def studio_plan(p: PlanIn):
 
 @app.post("/api/studio/shots")
 def studio_add(s: ShotIn):
-    return studio.add_shot(s.title, s.prompt, s.keyframe, s.frames or 49, s.size or "832x480", s.notes)
+    return studio.add_shot(s.title, s.prompt, s.keyframe, s.frames or 49, s.size or "832x480", s.notes, s.character)
 
 
 @app.put("/api/studio/shots/{sid}")
@@ -682,6 +684,191 @@ def studio_asset_get(name: str):
     if not p.exists():
         raise HTTPException(404, "no such asset")
     return FileResponse(str(p))
+
+
+# ---- characters: the bible; hero, hero set and LoRA built on the box by the cinema_character recipe
+
+class CharacterIn(BaseModel):
+    name: str
+    description: str
+    style: str | None = ""
+    negative: str | None = ""
+    hero: str | None = None
+    hero_src: str | None = None
+    heroset_dir: str | None = None
+    lora_dir: str | None = None
+    workdir: str | None = None
+
+
+class CharacterPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    style: str | None = None
+    negative: str | None = None
+    hero: str | None = None
+    hero_src: str | None = None
+    workdir: str | None = None
+    heroset_dir: str | None = None
+    lora_dir: str | None = None
+    status: str | None = None
+
+
+class BuildIn(BaseModel):
+    stage: str | None = "heroset"
+    executor: str | None = None
+    smoke: bool | None = None
+    force: bool | None = False
+
+
+@app.get("/api/studio/characters")
+def studio_characters():
+    return studio.list_characters()
+
+
+@app.post("/api/studio/characters")
+def studio_character_add(c: CharacterIn):
+    return studio.add_character(c.name, c.description, c.style or "", c.negative or "", c.hero, c.hero_src, c.heroset_dir, c.lora_dir, c.workdir)
+
+
+@app.put("/api/studio/characters/{cid}")
+def studio_character_update(cid: str, p: CharacterPatch):
+    try:
+        return studio.update_character(cid, p.model_dump())
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/api/studio/characters/{cid}")
+def studio_character_remove(cid: str):
+    try:
+        studio.remove_character(cid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/studio/characters/{cid}/build")
+def studio_character_build(cid: str, b: BuildIn):
+    try:
+        return studio.build_character(cid, b.stage or "heroset", b.executor, b.smoke, force=bool(b.force))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/studio/characters/{cid}/refresh")
+def studio_character_refresh(cid: str):
+    try:
+        return studio.refresh_character(cid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.get("/api/studio/characters/{cid}/{name}")
+def studio_character_file(cid: str, name: str):
+    p = studio.character_file(_safe_name(cid), name)
+    if not p:
+        raise HTTPException(404, "not fetched yet")
+    return FileResponse(str(p), headers={"Cache-Control": "private, max-age=60"})
+
+
+# ---- scenes: ordered shots, filler b-roll or a full scene; assembled here with ffmpeg
+
+class SceneIn(BaseModel):
+    title: str
+    kind: str | None = "filler"
+    set_name: str | None = ""
+    splat: str | None = None
+    characters: list[str] | None = None
+    shots: list[str] | None = None
+    dialogue: list[dict[str, str]] | None = None
+    continuity: str | None = ""
+    logline: str | None = ""
+
+
+class ScenePatch(BaseModel):
+    title: str | None = None
+    kind: str | None = None
+    set: dict[str, Any] | None = None
+    characters: list[str] | None = None
+    shots: list[str] | None = None
+    dialogue: list[dict[str, str]] | None = None
+    continuity: str | None = None
+    status: str | None = None
+    logline: str | None = None
+
+
+class ScenePlanIn(BaseModel):
+    logline: str
+    kind: str | None = "filler"
+    n: int | None = None
+    characters: list[str] | None = None
+    set_name: str | None = ""
+    model: str | None = None
+
+
+class SceneRenderIn(BaseModel):
+    executor: str | None = None
+    smoke: bool | None = None
+    only_missing: bool | None = False
+
+
+@app.get("/api/studio/scenes")
+def studio_scenes():
+    return studio.list_scenes()
+
+
+@app.post("/api/studio/scenes")
+def studio_scene_add(s: SceneIn):
+    return studio.add_scene(s.title, s.kind or "filler", s.set_name or "", s.splat, s.characters, s.shots, s.dialogue, s.continuity or "", s.logline or "")
+
+
+@app.post("/api/studio/scenes/plan")
+def studio_scene_plan(p: ScenePlanIn):
+    try:
+        return studio.plan_scene(p.logline, p.kind or "filler", p.n, p.characters, p.set_name or "", p.model)
+    except Exception as e:
+        raise HTTPException(502, f"planning failed: {e}")
+
+
+@app.put("/api/studio/scenes/{sid}")
+def studio_scene_update(sid: str, p: ScenePatch):
+    try:
+        return studio.update_scene(sid, p.model_dump())
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/api/studio/scenes/{sid}")
+def studio_scene_remove(sid: str, with_shots: bool = False):
+    try:
+        studio.remove_scene(sid, with_shots)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/studio/scenes/{sid}/render")
+def studio_scene_render(sid: str, r: SceneRenderIn):
+    try:
+        return studio.render_scene(sid, r.executor, r.smoke, only_missing=bool(r.only_missing))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/studio/scenes/{sid}/assemble")
+def studio_scene_assemble(sid: str):
+    try:
+        return studio.assemble_scene(sid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/studio/scenes/{sid}/{name}")
+def studio_scene_file(sid: str, name: str):
+    p = studio.scene_file(_safe_name(sid), name)
+    if not p:
+        raise HTTPException(404, "not assembled yet")
+    return FileResponse(str(p), headers={"Cache-Control": "private, max-age=60"})
 
 
 @app.get("/api/telemetry")

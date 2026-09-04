@@ -18,6 +18,11 @@ How to run
     python lab/recipes/pretrain_nano.py --steps 2000 --n-layer 6 --d-model 384 --n-head 6 --seq-len 256 --batch 32
   real from curate.py shards (train.bin / val.bin of uint16 GPT-2 ids):
     python lab/recipes/pretrain_nano.py --data-dir out/curate --steps 2000
+  from a text file written by data_prep.py (the training pie, Lab 21); --smoke keeps the
+  tiny model but reads this corpus with a character vocabulary built from it:
+    python lab/recipes/pretrain_nano.py --smoke --corpus out/data_prep/corpus.txt --steps 300
+  continue a checkpoint (its architecture and tokenizer win over the size flags):
+    python lab/recipes/pretrain_nano.py --init out/pretrain_nano/ckpt.pt --corpus more.txt --steps 500
   recurrent depth comparison at matched parameters:
     python lab/recipes/pretrain_nano.py --steps 2000 --n-layer 2 --loop 3
 
@@ -62,12 +67,22 @@ def build_parser():
     p.add_argument("--text-field", default="text")
     p.add_argument("--tokenizer", choices=["gpt2", "char"], default="gpt2", help="real mode tokenizer")
     p.add_argument("--data-dir", default=None, help="directory with train.bin and val.bin (uint16 GPT-2 ids) from curate.py")
+    p.add_argument("--corpus", default=None, help="a plain text file (data_prep.py's corpus.txt); char vocabulary in smoke or with --tokenizer char")
+    p.add_argument("--init", default=None, help="start from this checkpoint's weights and tokenizer (continue pretraining)")
     p.add_argument("--compile", action="store_true", help="torch.compile the model (cuda)")
     return p
 
 
-def load_tokens(args, device):
-    """Return (train_ids, val_ids, tokenizer) as 1-D long tensors on cpu."""
+def load_tokens(args, device, tok=None):
+    """Return (train_ids, val_ids, tokenizer) as 1-D long tensors on cpu. A tokenizer from --init is reused."""
+    if args.corpus:
+        text = open(args.corpus, encoding="utf-8", errors="replace").read()
+        if tok is None:
+            tok = C.CharTokenizer(sorted(set(text))) if (args.smoke or args.tokenizer == "char") else C.TiktokenWrapper("gpt2")
+        ids = torch.tensor(tok.encode(text), dtype=torch.long)
+        n_val = max(args.seq_len + 2, int((0.1 if args.smoke else 0.02) * ids.numel()))
+        C.log(f"corpus {args.corpus}: {ids.numel():,} tokens (vocab {tok.vocab_size}); val = last {n_val}")
+        return ids[:-n_val], ids[-n_val:], tok
     if args.smoke:
         tok = C.CharTokenizer()
         text = C.synthetic_text("all")
@@ -126,10 +141,17 @@ def main():
     device = C.pick_device(args.device)
     os.makedirs(args.out, exist_ok=True)
 
-    train_ids, val_ids, tok = load_tokens(args, device)
-    cfg = C.GPTConfig(vocab_size=tok.vocab_size, n_layer=args.n_layer, d_model=args.d_model, n_head=args.n_head,
-                      seq_len=args.seq_len, loop=args.loop)
-    model = C.GPT(cfg).to(device)
+    init_tok = None
+    if args.init:  # continue: the checkpoint fixes the architecture and the tokenizer
+        model, init_tok, ck = C.load_checkpoint(args.init, device)
+        for k in ("n_layer", "d_model", "n_head", "seq_len", "loop"):
+            setattr(args, k, getattr(model.cfg, k))
+        C.log(f"init from {args.init} (step {ck.get('step')})")
+    train_ids, val_ids, tok = load_tokens(args, device, init_tok)
+    if not args.init:
+        cfg = C.GPTConfig(vocab_size=tok.vocab_size, n_layer=args.n_layer, d_model=args.d_model, n_head=args.n_head,
+                          seq_len=args.seq_len, loop=args.loop)
+        model = C.GPT(cfg).to(device)
     n_params = model.num_params()
     fpt = model.flops_per_token()
     C.log(f"device={device} params={n_params:,} (non-embedding {model.num_params(True):,}) loop={args.loop} "

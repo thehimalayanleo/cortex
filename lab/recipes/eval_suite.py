@@ -22,7 +22,12 @@ How to run
     python lab/recipes/eval_suite.py --model Qwen/Qwen2.5-0.5B-Instruct --tasks gsm8k,hellaswag --limit 200
     python lab/recipes/eval_suite.py --model out/sft_lora/adapter --custom-jsonl my_eval.jsonl
   --custom-jsonl rows are {"prompt": ..., "answer": ...}; add --chat to wrap the
-  prompt in the model's chat template.
+  prompt in the model's chat template. A prediction that contains "answer:" is
+  scored on the text after its last "answer:" (the training pie's format, Lab 21);
+  otherwise on its first non-empty line.
+  the training pie: a lab checkpoint (--ckpt selects the nano path) on data_prep.py's
+  held-out reasoning set, with a before/after report against an earlier checkpoint:
+    python lab/recipes/eval_suite.py --ckpt out/rl/ckpt.pt --baseline-ckpt out/midtrain/ckpt.pt --custom-jsonl out/data_prep/reason_heldout.jsonl
   needs: pip install lm-eval transformers   (peft if --model is an adapter directory)
 """
 from __future__ import annotations
@@ -50,7 +55,8 @@ def build_parser():
     p.add_argument("--chat", action="store_true", help="wrap custom prompts in the chat template")
     p.add_argument("--max-new", type=int, default=64)
     p.add_argument("--judge", choices=["none", "stub"], default="none", help="LLM judge hook (stub only, see llm_judge)")
-    p.add_argument("--ckpt", default=None, help="smoke: evaluate this pretrain_nano/sft checkpoint instead of training one")
+    p.add_argument("--ckpt", default=None, help="evaluate this lab checkpoint (nano path) instead of training one")
+    p.add_argument("--baseline-ckpt", default=None, help="nano path: also evaluate this checkpoint and report the delta (before/after)")
     return p
 
 
@@ -76,6 +82,13 @@ def first_line(s: str) -> str:
     return s.strip()
 
 
+def extract_answer(s: str) -> str:
+    """The span exact match looks at: after the last 'answer:' when there is one, else the first line."""
+    if "answer:" in s:
+        return first_line(s.rsplit("answer:", 1)[1])
+    return first_line(s)
+
+
 def llm_judge(prompt: str, gold: str, pred: str):
     """Hook for an LLM-as-judge score in [0, 1] or None when no judge is configured.
 
@@ -90,9 +103,9 @@ def llm_judge(prompt: str, gold: str, pred: str):
 def custom_eval(rows: list[dict], generate_fn, judge: bool, seed: int, log_examples: int = 5) -> dict:
     """rows: [{prompt, answer}], generate_fn: list[str] -> list[str]. Returns the summary dict."""
     preds = generate_fn([r["prompt"] for r in rows])
-    ems = [exact_match(first_line(p), r["answer"]) for p, r in zip(preds, rows)]
+    ems = [exact_match(extract_answer(p), r["answer"]) for p, r in zip(preds, rows)]
     for r, p in list(zip(rows, preds))[:log_examples]:
-        C.log(f"  prompt={r['prompt']!r} pred={first_line(p)!r} gold={r['answer']!r}")
+        C.log(f"  prompt={r['prompt']!r} pred={extract_answer(p)!r} gold={r['answer']!r}")
     mean, lo, hi = C.bootstrap_ci(ems, seed=seed)
     out = {"n": len(rows), "exact_match": mean, "ci95_lo": lo, "ci95_hi": hi}
     if judge:
@@ -111,6 +124,7 @@ def smoke(args):
     held, train = lines[:80], lines[80:]
     if args.ckpt:
         model, tok, _ = C.load_checkpoint(args.ckpt, device)
+        C.log(f"evaluating {args.ckpt}")
     else:
         tok = C.CharTokenizer()
         model = C.GPT(C.GPTConfig(vocab_size=tok.vocab_size, n_layer=2, d_model=64, n_head=4, seq_len=64)).to(device)
@@ -129,19 +143,42 @@ def smoke(args):
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             C.metric(step, loss=loss.item(), lr=lr)
-    rows = [{"prompt": line.split("=")[0] + "= ", "answer": line.split("=")[1].strip()} for line in held]
+    if args.custom_jsonl:
+        rows = [{"prompt": r["prompt"], "answer": str(r["answer"])} for r in C.read_jsonl(args.custom_jsonl) if r.get("prompt") and r.get("answer") is not None]
+        max_new = args.max_new
+        what = f"{len(rows)} items from {args.custom_jsonl}"
+    else:
+        rows = [{"prompt": line.split("=")[0] + "= ", "answer": line.split("=")[1].strip()} for line in held]
+        max_new = 8
+        what = f"{len(rows)} held-out arithmetic prompts"
     C.write_jsonl(os.path.join(args.out, "smoke_eval.jsonl"), rows)
 
-    def generate_fn(prompts):
-        ids, mask = C.left_pad([tok.encode(p) for p in prompts], tok.pad_id)
-        out = C.generate(model, ids.to(device), 8, greedy=True, eos_id=tok.eos_id, attn_mask=mask.to(device))
-        return [tok.decode(row[ids.shape[1]:].tolist()) for row in out]
+    def make_generate_fn(m, batch=64):
+        def generate_fn(prompts):
+            outs = []
+            for i in range(0, len(prompts), batch):
+                ids, mask = C.left_pad([tok.encode(p) for p in prompts[i: i + batch]], tok.pad_id)
+                out = C.generate(m, ids.to(device), max_new, greedy=True, eos_id=tok.eos_id, attn_mask=mask.to(device))
+                outs += [tok.decode(row[ids.shape[1]:].tolist()) for row in out]
+            return outs
+        return generate_fn
 
-    C.status("eval", f"exact match on {len(rows)} held-out arithmetic prompts")
-    summary = custom_eval(rows, generate_fn, args.judge == "stub", args.seed)
+    C.status("eval", f"exact match on {what}")
+    summary = custom_eval(rows, make_generate_fn(model), args.judge == "stub", args.seed)
     C.log(f"exact match {summary['exact_match']:.3f}  95% bootstrap CI [{summary['ci95_lo']:.3f}, {summary['ci95_hi']:.3f}]  n={summary['n']}")
+    extra = {}
+    if args.baseline_ckpt:
+        base, btok, _ = C.load_checkpoint(args.baseline_ckpt, device)
+        if btok.vocab_size != tok.vocab_size:
+            raise SystemExit("--baseline-ckpt has a different tokenizer; the before/after report needs the same vocabulary")
+        C.status("baseline", f"the same items on {args.baseline_ckpt}")
+        b = custom_eval(rows, make_generate_fn(base), False, args.seed, log_examples=3)
+        C.log(f"baseline exact match {b['exact_match']:.3f}  CI [{b['ci95_lo']:.3f}, {b['ci95_hi']:.3f}]")
+        extra = {"baseline_exact_match": b["exact_match"], "baseline_ci95_lo": b["ci95_lo"], "baseline_ci95_hi": b["ci95_hi"],
+                 "delta_exact_match": summary["exact_match"] - b["exact_match"], "baseline_ckpt": args.baseline_ckpt}
+        C.metric(1, exact_match=summary["exact_match"], baseline_exact_match=b["exact_match"])
     C.status("done", "")
-    C.result(**{f"custom_{k}": v for k, v in summary.items()}, steps=args.steps)
+    C.result(**{f"custom_{k}": v for k, v in summary.items()}, **extra, steps=args.steps, checkpoint=args.ckpt)
 
 
 # --------------------------------------------------------------------------- real
@@ -220,7 +257,7 @@ def main():
         args.steps = 300
     C.set_seed(args.seed)
     os.makedirs(args.out, exist_ok=True)
-    (smoke if args.smoke else real)(args)
+    (smoke if (args.smoke or args.ckpt) else real)(args)
 
 
 if __name__ == "__main__":

@@ -363,7 +363,7 @@ export const webmcpTools: ModelContextTool[] = [
   // ---- the Studio (agentic cinema) and the collector
   {
     name: "studio_board",
-    description: "The Studio: logline, shot list with status, each shot's takes with critic scores (identity, flicker) and verdicts, and keyframe assets. Opens the board.",
+    description: "The Studio: logline, shot list with status, each shot's takes with critic scores (identity, flicker) and verdicts, keyframe assets, the character bible, and scenes. Opens the board.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     execute: async (i) => {
@@ -402,6 +402,67 @@ export const webmcpTools: ModelContextTool[] = [
       const sh = await api.studio.refresh(s(i.id, 80));
       changed(); navigate({ kind: "lab", studio: true }); record("refresh_shot", i, true, `${sh.id} · ${sh.status}`);
       return text(sh);
+    },
+  },
+  {
+    name: "list_characters",
+    description: "The Studio's character bible: id, name, description (identity text), hero image, hero set and LoRA folders on the GPU box, status and prototype scores.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const cs = await api.studio.characters();
+      record("list_characters", i, true, `${cs.length} characters`);
+      return text(cs);
+    },
+  },
+  {
+    name: "build_character",
+    description: "Build a character on the user's GPU box: stage hero (image from its description), heroset (framings; the identity prototype) or lora (character LoRA). add: true with name and description creates it first. Opens the run; smoke: true runs the offline brick.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, stage: { type: "string", enum: ["hero", "heroset", "lora"] }, add: { type: "boolean" }, name: { type: "string" }, description: { type: "string" }, style: { type: "string" }, executor: { type: "string" }, smoke: { type: "boolean" } } },
+    execute: async (i) => {
+      let id = s(i.id, 80);
+      if (i.add || !id) {
+        const c = await api.studio.addCharacter({ name: s(i.name || "Character", 80), description: s(i.description, 1500), style: s(i.style, 300) });
+        id = c.id;
+      }
+      const stage = (["hero", "heroset", "lora"].includes(String(i.stage)) ? String(i.stage) : "heroset") as "hero" | "heroset" | "lora";
+      const r = await api.studio.buildCharacter(id, { stage, executor: i.executor ? s(i.executor, 10) : undefined, smoke: typeof i.smoke === "boolean" ? i.smoke : undefined });
+      changed(); navigate({ kind: "lab", run: r.id }); record("build_character", i, true, `${stage} of ${id} · ${r.id}`);
+      return text(r);
+    },
+  },
+  {
+    name: "plan_scene",
+    description: "Director: plan a scene from a logline and add its shots to the board. kind filler = 2 to 4 short b-roll shots (17 to 33 frames) for post-production cutaways; full = n shots with dialogue and continuity notes. characters: ids to cast.",
+    inputSchema: { type: "object", properties: { logline: { type: "string" }, kind: { type: "string", enum: ["filler", "full"] }, n: { type: "integer" }, characters: { type: "array", items: { type: "string" } }, set_name: { type: "string" } }, required: ["logline"] },
+    execute: async (i) => {
+      navigate({ kind: "lab", studio: true });
+      const kind = i.kind === "full" ? "full" : "filler";
+      const sc = await api.studio.planScene({ logline: s(i.logline, 2000), kind, n: i.n != null ? n(i.n, 2, 12) : undefined, characters: Array.isArray(i.characters) ? i.characters.map((x) => s(x, 80)) : undefined, set_name: i.set_name ? s(i.set_name, 120) : undefined });
+      changed(); record("plan_scene", i, true, `${sc.kind} scene ${sc.id} · ${sc.shots.length} shots`);
+      return text(sc);
+    },
+  },
+  {
+    name: "render_scene",
+    description: "Render every shot of a scene in order on the GPU box, one take at a time, then mark it rendered; only_missing skips shots already rendered. smoke: true uses the offline brick. Then assemble_scene.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, smoke: { type: "boolean" }, only_missing: { type: "boolean" } }, required: ["id"] },
+    execute: async (i) => {
+      navigate({ kind: "lab", studio: true });
+      const sc = await api.studio.renderScene(s(i.id, 80), { smoke: typeof i.smoke === "boolean" ? i.smoke : undefined, only_missing: !!i.only_missing });
+      changed(); record("render_scene", i, true, `rendering ${sc.id} · ${sc.shots.length} shots`);
+      return text(sc);
+    },
+  },
+  {
+    name: "assemble_scene",
+    description: "Concatenate the latest kept take of each shot of a scene into scene.mp4 (ffmpeg, on this machine) with a contact strip; returns the video path and any shots still missing a clip.",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    execute: async (i) => {
+      navigate({ kind: "lab", studio: true });
+      const sc = await api.studio.assembleScene(s(i.id, 80));
+      changed(); record("assemble_scene", i, true, `${sc.id} · ${sc.clips} clips${sc.missing.length ? ` · ${sc.missing.length} missing` : ""}`);
+      return text(sc);
     },
   },
   {

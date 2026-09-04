@@ -20,6 +20,10 @@ How to run
     python lab/recipes/sft_lora.py --smoke --steps 300
     python lab/recipes/sft_lora.py --smoke --steps 300 --ckpt out/pretrain_nano/ckpt.pt
     python lab/recipes/sft_lora.py --smoke --steps 300 --no-mask     # see what dropping the mask does
+  the training pie (Lab 21): --ckpt selects this nano path even without --smoke, and
+  --pairs-jsonl replaces the built-in Q/A with data_prep.py's sft.jsonl (or any
+  {"messages": [...]} / {"prompt", "response"} rows); a held-out slice is kept for exact match:
+    python lab/recipes/sft_lora.py --ckpt out/midtrain/ckpt.pt --pairs-jsonl out/data_prep/sft.jsonl --steps 300 --max-new 64
   real (RTX 5090): LoRA on a small instruct model with the NVIDIA agentic SFT set
     python lab/recipes/sft_lora.py --model Qwen/Qwen2.5-0.5B-Instruct --dataset nvidia/Nemotron-SFT-Agentic-v2 --max-samples 5000 --steps 300
   needs: pip install transformers trl peft datasets   (and optionally unsloth)
@@ -46,6 +50,9 @@ def build_parser():
     p = C.base_parser("sft_lora", __doc__.split("\n")[0])
     p.add_argument("--ckpt", default=None, help="smoke: start from a pretrain_nano.py checkpoint")
     p.add_argument("--no-mask", action="store_true", help="smoke: train on prompt tokens too (to see why the mask matters)")
+    p.add_argument("--pairs-jsonl", default=None, help="nano path: rows of {messages} or {prompt, response} instead of the built-in Q/A")
+    p.add_argument("--heldout-frac", type=float, default=0.1, help="nano path with --pairs-jsonl: fraction kept for exact match")
+    p.add_argument("--max-new", type=int, default=24, help="nano path: tokens decoded per question at eval")
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--batch", type=int, default=None)
     p.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
@@ -81,6 +88,28 @@ def build_example(tok: C.CharTokenizer, q: str, a: str, mask: bool) -> tuple[lis
     return ids, labels
 
 
+def load_pairs(path: str) -> list[tuple[str, str]]:
+    """(question, answer) pairs from {messages}, {prompt, response}, or {question, answer} rows."""
+    pairs = []
+    for r in C.read_jsonl(path):
+        msgs = r.get("messages")
+        if msgs and len(msgs) >= 2 and msgs[-1].get("role") == "assistant":
+            pairs.append((str(msgs[-2].get("content", "")), str(msgs[-1].get("content", ""))))
+        elif r.get("prompt") and r.get("response"):
+            pairs.append((str(r["prompt"]), str(r["response"])))
+        elif r.get("question") and r.get("answer"):
+            pairs.append((str(r["question"]), str(r["answer"])))
+    return pairs
+
+
+def final_answer(s: str) -> str:
+    """What exact match compares: the text after the last 'answer:' when the reply has one, else the whole reply."""
+    s = s.strip()
+    if "answer:" in s:
+        s = s.rsplit("answer:", 1)[1]
+    return s.strip().splitlines()[0].strip() if s.strip() else ""
+
+
 def smoke(args):
     device = C.pick_device(args.device)
     tok = C.CharTokenizer()
@@ -90,11 +119,20 @@ def smoke(args):
     else:
         model = C.GPT(C.GPTConfig(vocab_size=tok.vocab_size, n_layer=2, d_model=64, n_head=4, seq_len=96)).to(device)
         C.log("no --ckpt: training the minimal GPT from scratch on the Q/A pairs")
-    train_pairs = C.QA[:16]
-    held_pairs = C.QA[16:]
+    if args.pairs_jsonl:
+        pairs = load_pairs(args.pairs_jsonl)
+        if len(pairs) < 2:
+            raise SystemExit(f"{args.pairs_jsonl}: need at least 2 usable rows, found {len(pairs)}")
+        n_held = max(1, int(args.heldout_frac * len(pairs)))
+        held_pairs, train_pairs = pairs[:n_held], pairs[n_held:]
+        C.log(f"{args.pairs_jsonl}: {len(train_pairs)} train pairs, {len(held_pairs)} held out")
+    else:
+        train_pairs = C.QA[:16]
+        held_pairs = C.QA[16:]
     examples = [build_example(tok, q, a, not args.no_mask) for q, a in train_pairs]
-    ids, mask = C.pad_batch([e[0] for e in examples], tok.pad_id)
-    labels, _ = C.pad_batch([e[1] for e in examples], -100)
+    max_len = model.cfg.seq_len + 1  # ids[:-1] must fit the context; longer examples are cut at the end
+    ids, mask = C.pad_batch([e[0] for e in examples], tok.pad_id, max_len)
+    labels, _ = C.pad_batch([e[1] for e in examples], -100, max_len)
     labels[~mask] = -100
     x, y = ids[:, :-1].to(device), labels[:, 1:].to(device)
     supervised = int((y != -100).sum())
@@ -105,34 +143,40 @@ def smoke(args):
     opt = C.make_adamw(model, args.lr, 0.0)
     C.status("train", f"{args.steps} steps of answer-only SFT on {len(train_pairs)} pairs")
     model.train()
+    gen = torch.Generator().manual_seed(args.seed)
     for step in range(args.steps):
         lr = C.lr_at(step, args.steps, args.lr, 10, 0.1)
         for g in opt.param_groups:
             g["lr"] = lr
-        loss = C.lm_loss(model(x), y)
+        if x.shape[0] > args.batch:  # minibatches once the pair set is bigger than one batch
+            ix = torch.randint(0, x.shape[0], (args.batch,), generator=gen)
+            loss = C.lm_loss(model(x[ix]), y[ix])
+        else:
+            loss = C.lm_loss(model(x), y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         C.metric(step, loss=loss.item(), lr=lr, supervised_frac=frac)
 
-    def exact_match(pairs):
+    def exact_match(pairs, log_n=8):
         hits = 0
-        for q, a in pairs:
+        for i, (q, a) in enumerate(pairs):
             p = torch.tensor([tok.encode(f"q: {q}\na: ")], device=device)
-            out = C.generate(model, p, 24, greedy=True, eos_id=tok.eos_id)
+            out = C.generate(model, p, args.max_new, greedy=True, eos_id=tok.eos_id)
             pred = tok.decode(out[0, p.shape[1]:].tolist())
-            hits += int(pred.strip() == a)
-            C.log(f"  q={q!r} pred={pred!r} gold={a!r}")
-        return hits / len(pairs)
+            hits += int(final_answer(pred) == final_answer(a))
+            if i < log_n:
+                C.log(f"  q={q!r} pred={pred!r} gold={a!r}")
+        return hits / max(1, len(pairs))
 
     C.status("eval", "greedy decoding")
-    em_train = exact_match(train_pairs)
+    em_train = exact_match(train_pairs[:64])
     em_held = exact_match(held_pairs)
     path = C.save_checkpoint(os.path.join(args.out, "ckpt.pt"), model, tok, args.steps)
     C.status("done", f"saved {path}")
     C.result(final_loss=loss.item(), supervised_frac=frac, exact_match_train=em_train, exact_match_heldout=em_held,
-             n_train=len(train_pairs), n_heldout=len(held_pairs), checkpoint=path)
+             n_train=len(train_pairs), n_heldout=len(held_pairs), steps=args.steps, checkpoint=path)
 
 
 # --------------------------------------------------------------------------- real: TRL + LoRA
@@ -249,13 +293,14 @@ def real(args):
 
 def main():
     args = build_parser().parse_args()
-    d = dict(steps=300, lr=3e-3, batch=16) if args.smoke else dict(steps=300, lr=2e-4, batch=4)
+    nano = args.smoke or bool(args.ckpt)  # a lab checkpoint can only be loaded by the nano path
+    d = dict(steps=300, lr=3e-3, batch=16) if nano else dict(steps=300, lr=2e-4, batch=4)
     for k, v in d.items():
         if getattr(args, k) is None:
             setattr(args, k, v)
     C.set_seed(args.seed)
     os.makedirs(args.out, exist_ok=True)
-    (smoke if args.smoke else real)(args)
+    (smoke if nano else real)(args)
 
 
 if __name__ == "__main__":

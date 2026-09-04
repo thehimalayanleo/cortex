@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -71,9 +72,17 @@ def smoke_render(out: Path, prompt: str, frames: int, size: tuple[int, int], see
         sheet.paste(Image.open(out / "frames" / f"{p:03d}.png"), (k * W, 0))
     sheet.save(out / "contact.png")
     flick = [float(np.abs(np.asarray(Image.open(out / "frames" / f"{i+1:03d}.png"), dtype=np.float32) - np.asarray(Image.open(out / "frames" / f"{i:03d}.png"), dtype=np.float32)).mean()) for i in range(frames - 1)]
+    clip = None
+    ffmpeg = shutil.which("ffmpeg")  # a real clip when ffmpeg is here, so scenes can be assembled from smoke takes
+    if ffmpeg:
+        try:
+            subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "24", "-i", str(out / "frames" / "%03d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out / "clip.mp4")], check=True, timeout=120, capture_output=True)
+            clip = str(out / "clip.mp4")
+        except Exception as e:
+            print("smoke clip skipped:", e, flush=True)
     return {"model": "smoke-blob", "size": [W, H], "frames": frames, "gen_s": time.time() - t0, "elapsed_s": time.time() - t0,
             "identity_mean": sum(ids) / len(ids), "identity_min": min(ids), "identity_first": ids[0], "identity_last": ids[-1],
-            "flicker_mean": sum(flick) / len(flick), "flicker_max": max(flick), "clip": None, "contact": str(out / "contact.png")}
+            "flicker_mean": sum(flick) / len(flick), "flicker_max": max(flick), "clip": clip, "contact": str(out / "contact.png")}
 
 
 def real_render(out: Path, keyframe: str, prompt: str, frames: int, size: str, steps: int, proto: str | None) -> dict:

@@ -50,8 +50,13 @@ export interface LabRun {
 export interface LabRunDetail extends LabRun { log: string[]; log_lines: number; metrics: Record<string, number>[]; rollouts: Record<string, unknown>[]; result: Record<string, unknown> | null }
 
 export interface Take { id: string; status: string; started?: string; ended?: string | null; executor?: string; origin?: string; verdict?: string | null; identity_mean?: number | null; identity_min?: number | null; flicker_mean?: number | null; gen_s?: number | null; model?: string | null; contact?: string | null; clip?: string | null; fetched?: boolean }
-export interface Shot { id: string; title: string; prompt: string; keyframe?: string | null; frames?: number; size?: string; notes?: string; status: "planned" | "rendering" | "rendered" | "approved" | "reshoot"; takes: Take[]; created?: string; director_note?: string }
-export interface StudioBoard { logline: string; shots: Shot[]; counts: Record<string, number>; assets: string[] }
+export interface Shot { id: string; title: string; prompt: string; keyframe?: string | null; character?: string | null; frames?: number; size?: string; notes?: string; status: "planned" | "rendering" | "rendered" | "approved" | "reshoot"; takes: Take[]; created?: string; director_note?: string }
+export interface CharacterBuild { id: string; status: string; stage?: string | null; started?: string; ended?: string | null; executor?: string; proto_mean?: number | null; proto_min?: number | null; p_own?: number | null; n_kept?: number | null; elapsed_s?: number | null }
+export type CharacterStage = "hero" | "heroset" | "lora";
+export interface Character { id: string; name: string; description: string; style?: string; negative?: string; hero?: string | null; hero_src?: string | null; workdir?: string; heroset_dir?: string | null; lora_dir?: string | null; status: "draft" | "building" | "hero" | "heroset" | "lora" | "failed"; builds: CharacterBuild[]; scores?: Record<string, number>; hero_url?: string | null; contact?: string | null; created?: string }
+export interface SceneShotRow { id: string; title: string; status: string; verdict?: string | null; take?: string | null; frames?: number }
+export interface Scene { id: string; title: string; kind: "filler" | "full"; set: { name: string; splat?: string | null }; characters: string[]; shots: string[]; dialogue: { who: string; line: string }[]; continuity?: string; logline?: string; status: "planned" | "rendering" | "rendered" | "assembled"; duration_s: number; shot_rows: SceneShotRow[]; video?: string | null; strip?: string | null; created?: string }
+export interface StudioBoard { logline: string; shots: Shot[]; counts: Record<string, number>; assets: string[]; characters: Character[]; scenes: Scene[] }
 export interface TraceIn { kind?: string; content?: string; data?: unknown; tags?: string[]; source?: string; context?: string; prompt?: string; response?: string; chosen?: string; rejected?: string; rating?: number }
 export interface TraceRec extends TraceIn { id: string; ts: number; when: string; kind: string; file?: string }
 export interface TraceStats { total: number; by_kind: Record<string, number>; by_month: Record<string, number>; since: string | null; sft_pairs: number; dpo_pairs: number; root: string }
@@ -235,6 +240,21 @@ export const api = {
       return request<{ name: string; url: string }>("/studio/assets", { method: "POST", body: fd });
     },
     assetUrl: (name: string) => `${BASE}/studio/assets/${encodeURIComponent(name)}`,
+    // characters: the bible; hero, hero set and LoRA built by the cinema_character recipe
+    characters: () => request<Character[]>("/studio/characters"),
+    addCharacter: (data: { name: string; description: string; style?: string; negative?: string; hero?: string; hero_src?: string; heroset_dir?: string; lora_dir?: string; workdir?: string }) => request<Character>("/studio/characters", { method: "POST", body: JSON.stringify(data) }),
+    updateCharacter: (id: string, patch: Partial<Omit<Character, "builds" | "scores">>) => request<Character>(`/studio/characters/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) }),
+    removeCharacter: (id: string) => request<{ ok: boolean }>(`/studio/characters/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    buildCharacter: (id: string, opts: { stage: CharacterStage; executor?: string; smoke?: boolean; force?: boolean }) => request<LabRun>(`/studio/characters/${encodeURIComponent(id)}/build`, { method: "POST", body: JSON.stringify(opts) }),
+    refreshCharacter: (id: string) => request<Character>(`/studio/characters/${encodeURIComponent(id)}/refresh`, { method: "POST" }),
+    // scenes: ordered shots; filler b-roll or a full scene; assembled here with ffmpeg
+    scenes: () => request<Scene[]>("/studio/scenes"),
+    addScene: (data: { title: string; kind?: "filler" | "full"; set_name?: string; splat?: string; characters?: string[]; shots?: string[]; dialogue?: { who: string; line: string }[]; continuity?: string; logline?: string }) => request<Scene>("/studio/scenes", { method: "POST", body: JSON.stringify(data) }),
+    planScene: (data: { logline: string; kind?: "filler" | "full"; n?: number; characters?: string[]; set_name?: string }) => request<Scene>("/studio/scenes/plan", { method: "POST", body: JSON.stringify(data) }),
+    updateScene: (id: string, patch: Partial<Pick<Scene, "title" | "kind" | "set" | "characters" | "shots" | "dialogue" | "continuity" | "status" | "logline">>) => request<Scene>(`/studio/scenes/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) }),
+    removeScene: (id: string, withShots = false) => request<{ ok: boolean }>(`/studio/scenes/${encodeURIComponent(id)}?with_shots=${withShots}`, { method: "DELETE" }),
+    renderScene: (id: string, opts: { executor?: string; smoke?: boolean; only_missing?: boolean } = {}) => request<Scene>(`/studio/scenes/${encodeURIComponent(id)}/render`, { method: "POST", body: JSON.stringify(opts) }),
+    assembleScene: (id: string) => request<Scene & { clips: number; missing: string[]; path: string }>(`/studio/scenes/${encodeURIComponent(id)}/assemble`, { method: "POST" }),
   },
 
   traces: {

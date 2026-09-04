@@ -52,6 +52,7 @@ const LAB_STATION_ITEMS = [
   { id: "speculative", title: "Speculative decoding", hint: "draft, then verify" },
   { id: "moe", title: "Mixture of experts", hint: "router and experts" },
   { id: "arch", title: "Architecture", hint: "calculator and model probe" },
+  { id: "embed", title: "Embedding space", hint: "real BGE/MiniLM/E5 models in 3D" },
 ];
 
 export function SearchPalette({ open, onClose, onNewNote, onNewSpace, projects, space }: Props) {

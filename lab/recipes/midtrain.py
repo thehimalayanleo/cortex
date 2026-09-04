@@ -22,6 +22,9 @@ How to run
 
 Domain spec for real mode: "dataset_name[:config]:text_field" (the config is
 optional); the split is "train" and --max-samples rows are read per domain.
+Plain text files override either domain in any mode (the training pie, Lab 21):
+    python lab/recipes/midtrain.py --smoke --ckpt out/pretrain/ckpt.pt \
+        --text-a out/data_prep/corpus.txt --text-b out/data_prep/reason.txt --mix a=0.4,b=0.6
 """
 from __future__ import annotations
 
@@ -41,6 +44,8 @@ def build_parser():
     p.add_argument("--mix", default="a=0.7,b=0.3", help="sampling weights per domain, normalized")
     p.add_argument("--domain-a", default="roneneldan/TinyStories:text")
     p.add_argument("--domain-b", default="wikimedia/wikipedia:20231101.simple:text")
+    p.add_argument("--text-a", default=None, help="a text file for domain a (overrides --domain-a and the smoke stories)")
+    p.add_argument("--text-b", default=None, help="a text file for domain b (overrides --domain-b and the smoke arithmetic)")
     p.add_argument("--lr", type=float, default=None, help="stable-phase learning rate")
     p.add_argument("--min-lr-ratio", type=float, default=0.0)
     p.add_argument("--warmup", type=int, default=0, help="short re-warmup when starting from a cooled checkpoint")
@@ -139,12 +144,15 @@ def main():
         raise SystemExit("real mode needs --ckpt from pretrain_nano.py")
     seq_len = model.cfg.seq_len
 
+    def from_file(path):
+        return torch.tensor(tok.encode(open(path, encoding="utf-8", errors="replace").read()), dtype=torch.long)
+
     if args.smoke:
-        a_ids = torch.tensor(tok.encode(C.synthetic_text("stories")), dtype=torch.long)
-        b_ids = torch.tensor(tok.encode("\n".join(C.arithmetic_lines(400, seed=11)) + "\n"), dtype=torch.long)
+        a_ids = from_file(args.text_a) if args.text_a else torch.tensor(tok.encode(C.synthetic_text("stories")), dtype=torch.long)
+        b_ids = from_file(args.text_b) if args.text_b else torch.tensor(tok.encode("\n".join(C.arithmetic_lines(400, seed=11)) + "\n"), dtype=torch.long)
     else:
-        a_ids = load_domain(args.domain_a, tok, args.max_samples)
-        b_ids = load_domain(args.domain_b, tok, args.max_samples)
+        a_ids = from_file(args.text_a) if args.text_a else load_domain(args.domain_a, tok, args.max_samples)
+        b_ids = from_file(args.text_b) if args.text_b else load_domain(args.domain_b, tok, args.max_samples)
     a_tr, a_va = split(a_ids, seq_len)
     b_tr, b_va = split(b_ids, seq_len)
     C.log(f"domain a: {a_tr.numel():,} train tokens, domain b: {b_tr.numel():,}; mix={mix}")

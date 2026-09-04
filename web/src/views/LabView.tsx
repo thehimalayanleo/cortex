@@ -36,7 +36,7 @@ const DEFAULT_ARGS: Record<string, string> = {
   shell: "",
 };
 
-export const LAB_STATIONS = ["overview", "data", "pretrain", "midtrain", "posttrain", "encoder", "cluster", "paint", "speculative", "moe"] as const;
+export const LAB_STATIONS = ["overview", "data", "pretrain", "midtrain", "posttrain", "encoder", "cluster", "paint", "speculative", "moe", "arch", "embed"] as const;
 
 /** Ask the embedded lab page to do something; resolves with its reply. Used by the WebMCP tools too. */
 export function labMessage(msg: Record<string, unknown>, timeoutMs = 4000): Promise<Record<string, unknown>> {

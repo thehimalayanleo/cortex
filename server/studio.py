@@ -179,11 +179,14 @@ def refresh(sid: str) -> dict[str, Any]:
         if r["status"] == "done":
             fetch_take(rid, r)
             latest = r
-    if latest:
+    states = [(runs.read_run(rid, 0, 0) or {}).get("status") for rid in shot.get("takes", [])]
+    if any(st in ("queued", "running") for st in states):
+        update_shot(sid, {"status": "rendering"})
+    elif latest:
         res = latest.get("result") or {}
         update_shot(sid, {"status": "rendered" if res.get("verdict") == "keep" else "reshoot"})
-    elif any((runs.read_run(rid, 0, 0) or {}).get("status") in ("queued", "running") for rid in shot.get("takes", [])):
-        update_shot(sid, {"status": "rendering"})
+    elif states and states[-1] == "failed":
+        update_shot(sid, {"status": "reshoot", "director_note": "the last take failed; open it in GPU runs for the log"})
     return next(s for s in board()["shots"] if s["id"] == sid)
 
 

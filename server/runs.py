@@ -10,7 +10,7 @@ Layout inside the vault:
 Executors are configured by environment:
   CORTEX_SSH_HOST     e.g. ajinkya-5090 (a Tailscale SSH alias). Recipes are rsynced to ~/cortex-lab on the host.
   CORTEX_SSH_PYTHON   python on that host with torch installed (default: python3)
-  CORTEX_LOCAL_PYTHON command used for local runs (default: uv run --python 3.11 --with torch --with numpy python)
+  CORTEX_LOCAL_PYTHON command used for local runs (default: uv run --python 3.11 --with torch --with numpy --with pillow python)
   modal               available when the `modal` CLI is on PATH and ~/.modal.toml (or MODAL_TOKEN_ID) exists
 """
 from __future__ import annotations
@@ -98,7 +98,7 @@ def _command(executor: str, recipe: str, args: str, script: Path | None = None, 
         raise ValueError("modal_app is the Modal wrapper; pick a recipe and the modal executor instead")
     extra = shlex.split(args or "")
     if executor == "local":
-        py = shlex.split(os.environ.get("CORTEX_LOCAL_PYTHON") or "uv run --python 3.11 --with torch --with numpy python")
+        py = shlex.split(os.environ.get("CORTEX_LOCAL_PYTHON") or "uv run --python 3.11 --with torch --with numpy --with pillow python")
         return [*py, str(script), *extra]
     if executor == "ssh":
         host = os.environ.get("CORTEX_SSH_HOST", "").strip()

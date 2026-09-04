@@ -78,13 +78,14 @@ def smoke_render(out: Path, prompt: str, frames: int, size: tuple[int, int], see
 
 def real_render(out: Path, keyframe: str, prompt: str, frames: int, size: str, steps: int, proto: str | None) -> dict:
     """Call Celwright's Wan brick and relay its progress; parse its DONE line for the critics."""
-    brick = Path(os.environ.get("CINEMA_WAN_BRICK", "~/wan_i2v.py")).expanduser()
+    xp = lambda v: str(Path(os.path.expandvars(v)).expanduser())  # env values may arrive quoted, with $HOME unexpanded
+    brick = Path(xp(os.environ.get("CINEMA_WAN_BRICK", "~/wan_i2v.py")))
     if not brick.exists():
         raise SystemExit(f"the Wan brick is not here: {brick} (set CINEMA_WAN_BRICK, or run this recipe on the 5090)")
-    py = os.environ.get("CINEMA_WAN_PYTHON", sys.executable)
-    cmd = [py, str(brick), str(Path(keyframe).expanduser()), prompt, str(out), "--frames", str(frames), "--size", size, "--steps", str(steps)]
+    py = xp(os.environ.get("CINEMA_WAN_PYTHON", sys.executable))
+    cmd = [py, str(brick), xp(keyframe), prompt, str(out), "--frames", str(frames), "--size", size, "--steps", str(steps)]
     if proto:
-        cmd += ["--proto", proto]
+        cmd += ["--proto", xp(proto)]
     status(phase="render", msg=" ".join(cmd[:3]) + f" … frames={frames} size={size} steps={steps}")
     t0 = time.time()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

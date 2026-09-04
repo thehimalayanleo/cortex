@@ -13,6 +13,7 @@ import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
 import { StudioView } from "./StudioView";
 import { TracesView } from "./TracesView";
+import { PipelineView } from "./PipelineView";
 
 /** Arguments that make a first click succeed on any machine; edit them for the real thing. */
 const DEFAULT_ARGS: Record<string, string> = {
@@ -60,25 +61,26 @@ export function labMessage(msg: Record<string, unknown>, timeoutMs = 4000): Prom
   });
 }
 
-type LabTab = "stations" | "chapters" | "runs" | "plan" | "terminal" | "studio" | "traces";
+type LabTab = "stations" | "chapters" | "runs" | "plan" | "terminal" | "studio" | "traces" | "pipeline";
 
-export function LabView({ station, runId, plan, terminal, studio, traces, refresh }: { station?: string; runId?: string; plan?: boolean; terminal?: boolean; studio?: boolean; traces?: boolean; refresh: number }) {
-  const [tab, setTab] = useState<LabTab>(studio ? "studio" : traces ? "traces" : terminal ? "terminal" : plan ? "plan" : runId != null ? "runs" : "stations");
+export function LabView({ station, runId, plan, terminal, studio, traces, pipeline, pipelineId, refresh }: { station?: string; runId?: string; plan?: boolean; terminal?: boolean; studio?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string; refresh: number }) {
+  const [tab, setTab] = useState<LabTab>(pipeline ? "pipeline" : studio ? "studio" : traces ? "traces" : terminal ? "terminal" : plan ? "plan" : runId != null ? "runs" : "stations");
   useEffect(() => {
-    if (studio) setTab("studio");
+    if (pipeline) setTab("pipeline");
+    else if (studio) setTab("studio");
     else if (traces) setTab("traces");
     else if (terminal) setTab("terminal");
     else if (plan) setTab("plan");
     else if (runId != null) setTab("runs");
     else if (station) setTab("stations");
-  }, [runId, plan, station, terminal, studio, traces]);
+  }, [runId, plan, station, terminal, studio, traces, pipeline]);
   const chapters = useAsync(() => api.lab.chapters(), [], [refresh]);
 
   return (
     <section className="lab-view">
       <header className="lab-head">
         <div className="lab-tabs" role="tablist">
-          {(["plan", "stations", "chapters", "runs", "terminal", "studio", "traces"] as const).map((t) => (
+          {(["plan", "stations", "chapters", "runs", "pipeline", "terminal", "studio", "traces"] as const).map((t) => (
             <button
               key={t}
               role="tab"
@@ -86,10 +88,10 @@ export function LabView({ station, runId, plan, terminal, studio, traces, refres
               aria-selected={tab === t}
               onClick={() => {
                 setTab(t);
-                navigate(t === "plan" ? { kind: "lab", plan: true } : t === "studio" ? { kind: "lab", studio: true } : t === "traces" ? { kind: "lab", traces: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
+                navigate(t === "plan" ? { kind: "lab", plan: true } : t === "pipeline" ? { kind: "lab", pipeline: true } : t === "studio" ? { kind: "lab", studio: true } : t === "traces" ? { kind: "lab", traces: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
               }}
             >
-              {t === "plan" ? "My plan" : t === "stations" ? "In the browser" : t === "chapters" ? `Chapters${chapters.data ? ` · ${chapters.data.length}` : ""}` : t === "terminal" ? "Terminal" : t === "studio" ? "Studio" : t === "traces" ? "Traces" : "GPU runs"}
+              {t === "plan" ? "My plan" : t === "pipeline" ? "Pipeline" : t === "stations" ? "In the browser" : t === "chapters" ? `Chapters${chapters.data ? ` · ${chapters.data.length}` : ""}` : t === "terminal" ? "Terminal" : t === "studio" ? "Studio" : t === "traces" ? "Traces" : "GPU runs"}
             </button>
           ))}
         </div>
@@ -101,6 +103,7 @@ export function LabView({ station, runId, plan, terminal, studio, traces, refres
             <li><b>Chapters</b> are the theory, written to be read start to finish. Each has a short snippet you can run with the "Run on GPU" button, and a self-test.</li>
             <li><b>GPU runs</b> is the real thing: the same ideas as full scripts on your 5090. Loss curves and exact rollouts stream in while it trains.</li>
             <li><b>Studio</b> is agentic cinema: a shot list, takes rendered on the 5090, critics, verdicts; the director agent has the same buttons.</li>
+            <li><b>Pipeline</b> is the training pie: data, pretrain, midtrain, SFT, RL, eval as one chain of runs, each stage feeding the next its checkpoint (Lab 21).</li>
             <li><b>Traces</b> is your collector: anything you want a future model of you to learn from, kept for years, exportable as SFT or DPO rows.</li>
           </ol>
         </details>
@@ -112,6 +115,7 @@ export function LabView({ station, runId, plan, terminal, studio, traces, refres
       {tab === "terminal" && <Terminal />}
       {tab === "studio" && <StudioView refresh={refresh} />}
       {tab === "traces" && <TracesView refresh={refresh} />}
+      {tab === "pipeline" && <PipelineView pipelineId={pipelineId} refresh={refresh} />}
     </section>
   );
 }

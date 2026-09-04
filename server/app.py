@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import agents, chat, runs, studio, telemetry, traces, vault
+from . import agents, chat, pipeline, runs, studio, telemetry, traces, vault
 
 app = FastAPI(title="Cortex", version="0.1")
 
@@ -77,6 +77,7 @@ def _startup() -> None:
             print(f"lab: synced {n} chapter(s) into the vault")
     except Exception as e:
         print("lab: chapter sync failed", e)
+    pipeline.start_daemon()  # resumes any pipeline left running by a previous process (state lives in the vault)
 
 
 def _sse(gen: Iterator[dict]) -> StreamingResponse:
@@ -915,6 +916,76 @@ def trace_stats():
 @app.get("/api/traces/export")
 def trace_export(fmt: str = "sft"):
     return traces.export(fmt)
+
+
+# ---------------------------------------------------------------- pipelines: the training pie (a DAG of recipe runs)
+
+class PipelineIn(BaseModel):
+    template: str
+    executor: str | None = "local"
+    smoke: bool | None = True
+    overrides: dict[str, Any] | None = None  # {"out": ..., "title": ..., "args": {"<stage>": "<argument string>"}}
+    start: bool | None = False
+
+
+@app.get("/api/pipelines/templates")
+def pipelines_templates():
+    return pipeline.templates()
+
+
+@app.get("/api/pipelines")
+def pipelines_list(limit: int = 50):
+    return pipeline.list_pipelines(limit)
+
+
+@app.post("/api/pipelines")
+def pipelines_create(p: PipelineIn):
+    try:
+        out = pipeline.create(p.template, p.executor or "local", bool(p.smoke), p.overrides)
+        if p.start:
+            out = pipeline.start(out["id"])
+        return out
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/pipelines/{pid}")
+def pipelines_get(pid: str):
+    r = pipeline.read(pid)
+    if not r:
+        raise HTTPException(404, "no such pipeline")
+    return r
+
+
+@app.post("/api/pipelines/{pid}/start")
+def pipelines_start(pid: str):
+    try:
+        return pipeline.start(pid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/pipelines/{pid}/pause")
+def pipelines_pause(pid: str):
+    try:
+        return pipeline.pause(pid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/pipelines/{pid}/retry/{stage}")
+def pipelines_retry(pid: str, stage: str):
+    try:
+        return pipeline.retry(pid, stage)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/pipelines/{pid}")
+def pipelines_delete(pid: str, runs: bool = False):
+    if not pipeline.delete(pid, delete_runs=runs):
+        raise HTTPException(404, "no such pipeline")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- the training lab (static page + chapters)

@@ -11,7 +11,7 @@ export type Route =
   | { kind: "notes"; noteKind?: NoteKind }
   | { kind: "topics" }
   | { kind: "topic"; slug: string }
-  | { kind: "lab"; station?: string; run?: string; plan?: boolean; terminal?: boolean; studio?: boolean; traces?: boolean };
+  | { kind: "lab"; station?: string; run?: string; plan?: boolean; terminal?: boolean; studio?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string };
 
 export function routeToHash(r: Route): string {
   switch (r.kind) {
@@ -32,7 +32,7 @@ export function routeToHash(r: Route): string {
     case "topic":
       return `#/topic/${encodeURIComponent(r.slug)}`;
     case "lab":
-      return r.studio ? "#/lab/studio" : r.traces ? "#/lab/traces" : r.terminal ? "#/lab/terminal" : r.plan ? "#/lab/plan" : r.run ? `#/lab/run/${encodeURIComponent(r.run)}` : r.station ? `#/lab/${encodeURIComponent(r.station)}` : "#/lab";
+      return r.pipeline ? (r.pipelineId ? `#/lab/pipeline/${encodeURIComponent(r.pipelineId)}` : "#/lab/pipeline") : r.studio ? "#/lab/studio" : r.traces ? "#/lab/traces" : r.terminal ? "#/lab/terminal" : r.plan ? "#/lab/plan" : r.run ? `#/lab/run/${encodeURIComponent(r.run)}` : r.station ? `#/lab/${encodeURIComponent(r.station)}` : "#/lab";
   }
 }
 
@@ -64,6 +64,7 @@ export function parseHash(hash: string): Route {
       if (segs[1] === "plan") return { kind: "lab", plan: true };
       if (segs[1] === "terminal") return { kind: "lab", terminal: true };
       if (segs[1] === "studio") return { kind: "lab", studio: true };
+      if (segs[1] === "pipeline") return { kind: "lab", pipeline: true, pipelineId: segs[2] || undefined };
       if (segs[1] === "traces") return { kind: "lab", traces: true };
       return { kind: "lab", station: segs[1] || undefined };
     default:
@@ -85,6 +86,8 @@ export function parseCortexLink(href: string): Route | null {
     if (id === "terminal") return { kind: "lab", terminal: true };
     if (id === "studio") return { kind: "lab", studio: true };
     if (id === "traces") return { kind: "lab", traces: true };
+    const pm = /^pipeline(?:\/(.+))?$/.exec(id);
+    if (pm) return { kind: "lab", pipeline: true, pipelineId: pm[1] || undefined };
     if (id === "runs") return { kind: "lab", run: "" };
     return mm ? { kind: "lab", run: mm[1] } : { kind: "lab", station: id || undefined };
   }

@@ -271,7 +271,7 @@ function Shell() {
       view = <TopicView slug={route.slug} topics={topics.data} refresh={vaultTick} />;
       break;
     case "lab":
-      view = <LabView station={route.station} runId={route.run} plan={route.plan} terminal={route.terminal} studio={route.studio} traces={route.traces} refresh={vaultTick} />;
+      view = <LabView station={route.station} runId={route.run} plan={route.plan} terminal={route.terminal} studio={route.studio} traces={route.traces} pipeline={route.pipeline} pipelineId={route.pipelineId} refresh={vaultTick} />;
       break;
   }
 

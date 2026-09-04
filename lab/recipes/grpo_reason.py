@@ -184,6 +184,14 @@ def nano(args):
         tok = C.CharTokenizer()
         policy = C.GPT(C.GPTConfig(vocab_size=tok.vocab_size, n_layer=2, d_model=96, n_head=4, seq_len=192)).to(device)
         warm_start(policy, tok, tasks[:150], args.warm_steps, device)
+    # prompt + completion must fit the context: the policy-gradient pass scores the whole sequence
+    longest = max(len(tok.encode(t["prompt"])) for t in tasks + eval_tasks)
+    room = policy.cfg.seq_len - longest
+    if room < 8:
+        raise SystemExit(f"seq_len {policy.cfg.seq_len} leaves {room} tokens after the longest prompt ({longest}); pretrain with a longer --seq-len")
+    if args.max_new > room:
+        C.log(f"max_new {args.max_new} -> {room} so prompt + completion fits seq_len {policy.cfg.seq_len}")
+        args.max_new = room
     ref = __import__("copy").deepcopy(policy).eval()
     for p in ref.parameters():
         p.requires_grad_(False)

@@ -131,6 +131,9 @@ def smoke(args):
         held_pairs = C.QA[16:]
     examples = [build_example(tok, q, a, not args.no_mask) for q, a in train_pairs]
     max_len = model.cfg.seq_len + 1  # ids[:-1] must fit the context; longer examples are cut at the end
+    n_cut = sum(1 for e in examples if len(e[0]) > max_len)
+    if n_cut:
+        C.log(f"warning: {n_cut} of {len(examples)} examples are longer than seq_len {model.cfg.seq_len} and lose their tail (pretrain with a longer --seq-len)")
     ids, mask = C.pad_batch([e[0] for e in examples], tok.pad_id, max_len)
     labels, _ = C.pad_batch([e[1] for e in examples], -100, max_len)
     labels[~mask] = -100

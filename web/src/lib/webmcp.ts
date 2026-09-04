@@ -486,6 +486,51 @@ export const webmcpTools: ModelContextTool[] = [
       return text({ stats: st, traces: rows });
     },
   },
+  // ---- the training pie: pipelines of recipe runs
+  {
+    name: "list_pipelines",
+    description: "List training pipelines (data -> pretrain -> midtrain -> sft -> rl -> eval as one DAG of runs) with status, progress and the running stage, plus the available templates (reasoning-nano, embed-mine). Opens the Pipeline tab.",
+    inputSchema: { type: "object", properties: { limit: { type: "integer" } } },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      navigate({ kind: "lab", pipeline: true });
+      const [rows, ts] = await Promise.all([api.pipelines.list(n(i.limit ?? 20, 1, 100)), api.pipelines.templates()]);
+      record("list_pipelines", i, true, `${rows.length}`);
+      return text({ pipelines: rows, templates: ts });
+    },
+  },
+  {
+    name: "start_pipeline",
+    description: "Create and start a training pipeline from a template (reasoning-nano: a small reasoning model end to end from the user's Traces plus a synthetic verifiable reasoning set; embed-mine: embed the vault then contrastive fine-tuning) on executor local|ssh|modal; smoke true runs the CPU-sized version in minutes. Opens it so the person watches the flow. Only when the user asks to train or run a pipeline.",
+    inputSchema: { type: "object", properties: { template: { type: "string", enum: ["reasoning-nano", "embed-mine"] }, executor: { type: "string" }, smoke: { type: "boolean" } }, required: ["template"] },
+    execute: async (i) => {
+      const p = await api.pipelines.create({ template: s(i.template, 40), executor: s(i.executor || "local", 10), smoke: typeof i.smoke === "boolean" ? i.smoke : true, start: true });
+      changed(); navigate({ kind: "lab", pipeline: true, pipelineId: p.id }); record("start_pipeline", i, true, `${p.template} on ${p.executor} · ${p.id}`);
+      return text({ id: p.id, template: p.template, executor: p.executor, smoke: p.smoke, status: p.status, stages: p.stages.map((st) => ({ name: st.name, recipe: st.recipe, status: st.status })) });
+    },
+  },
+  {
+    name: "read_pipeline",
+    description: "Read a pipeline: every stage with status, run id, last metric, elapsed time and RESULT; the corpus composition (tokens per source); the final eval report when done. Opens it.",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const p = await api.pipelines.get(s(i.id, 80));
+      navigate({ kind: "lab", pipeline: true, pipelineId: p.id });
+      record("read_pipeline", i, true, `${p.id} · ${p.status} ${p.progress.done}/${p.progress.total}`);
+      return text({ id: p.id, template: p.template, status: p.status, error: p.error, progress: p.progress, data: p.data, final: p.final, stages: p.stages.map((st) => ({ name: st.name, recipe: st.recipe, status: st.status, run_id: st.run_id, args: st.args, last: st.last, elapsed_s: st.elapsed_s, error: st.error, result: st.result })) });
+    },
+  },
+  {
+    name: "retry_stage",
+    description: "Re-queue a failed pipeline stage (and everything downstream) and resume the pipeline in front of the user.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, stage: { type: "string" } }, required: ["id", "stage"] },
+    execute: async (i) => {
+      const p = await api.pipelines.retry(s(i.id, 80), s(i.stage, 40));
+      changed(); navigate({ kind: "lab", pipeline: true, pipelineId: p.id }); record("retry_stage", i, true, `${s(i.stage, 40)} · ${p.id}`);
+      return text({ id: p.id, status: p.status, stages: p.stages.map((st) => ({ name: st.name, status: st.status, run_id: st.run_id })) });
+    },
+  },
   {
     name: "read_run",
     description: "Read a run: status, parsed metrics (thinned), final result, and the last log lines.",

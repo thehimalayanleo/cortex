@@ -144,6 +144,14 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}, "kind": {"type": "string"}, "q": {"type": "string"}}}}},
     {"type": "function", "function": {"name": "read_run", "description": "Read a run: status, the parsed metrics (loss curves etc.), the final result, and the last log lines.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "tail": {"type": "integer"}}, "required": ["id"]}}},
+    {"type": "function", "function": {"name": "list_pipelines", "description": "List training pipelines (the training pie: data -> pretrain -> midtrain -> sft -> rl -> eval as one DAG of runs) with status, progress, and the stage that is running; also the available templates (reasoning-nano, embed-mine).",
+        "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}}},
+    {"type": "function", "function": {"name": "start_pipeline", "description": "Create and start a pipeline from a template: reasoning-nano (a small reasoning model end to end from the user's Traces plus a synthetic verifiable reasoning set) or embed-mine (embed the vault, then contrastive fine-tuning on its pairs). executor local|ssh|modal; smoke true runs the CPU-sized version in minutes. Opens the Pipeline tab. Only when the user asks to train or run a pipeline.",
+        "parameters": {"type": "object", "properties": {"template": {"type": "string", "enum": ["reasoning-nano", "embed-mine"]}, "executor": {"type": "string", "enum": ["local", "ssh", "modal"]}, "smoke": {"type": "boolean"}}, "required": ["template"]}}},
+    {"type": "function", "function": {"name": "read_pipeline", "description": "Read a pipeline: every stage with its status, run id, last metric, elapsed time and RESULT; the corpus composition (tokens per source) from the data stage; and the final eval report when it is done.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}},
+    {"type": "function", "function": {"name": "retry_stage", "description": "Re-queue a failed pipeline stage (and everything downstream of it) and resume the pipeline.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "stage": {"type": "string"}}, "required": ["id", "stage"]}}},
     {"type": "function", "function": {"name": "search_arxiv", "description": "Search arXiv on the web by topic when the vault has nothing (or too little). Returns up to n results with arxiv id, title, authors, year, summary, and whether it is already in the library. Follow with file_paper(arxiv=<id>) to import one.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "n": {"type": "integer"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
@@ -458,13 +466,33 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         m = r["metrics"]
         thin = m if len(m) <= 60 else [m[int(i * len(m) / 60)] for i in range(60)] + [m[-1]]
         return {**{k: r[k] for k in ("id", "recipe", "args", "executor", "status", "started", "ended", "exit")}, "result": r.get("result"), "metrics": thin, "rollouts": r.get("rollouts", [])[-16:], "log": r["log"]}, f"run {r['id']} · {r['status']}", f"cortex://lab/run/{r['id']}"
+    if name == "list_pipelines":
+        from . import pipeline
+        rows = pipeline.list_pipelines(int(a.get("limit") or 20))
+        return {"pipelines": rows, "templates": pipeline.templates()}, f"pipelines · {len(rows)}", "cortex://lab/pipeline"
+    if name == "start_pipeline":
+        from . import pipeline
+        p = pipeline.create(str(a["template"]), str(a.get("executor") or "local"), bool(a.get("smoke", True)))
+        p = pipeline.start(p["id"])
+        return {k: p[k] for k in ("id", "template", "title", "executor", "smoke", "status", "out")} | {"stages": [{"name": s["name"], "recipe": s["recipe"], "status": s["status"]} for s in p["stages"]]}, f"{p['template']} on {p['executor']} · {p['id']}", f"cortex://lab/pipeline/{p['id']}"
+    if name == "read_pipeline":
+        from . import pipeline
+        p = pipeline.read(str(a["id"]))
+        if not p:
+            raise ValueError(f"no pipeline {a['id']}")
+        stages = [{k: s.get(k) for k in ("name", "recipe", "status", "run_id", "args", "last", "elapsed_s", "error", "result")} for s in p["stages"]]
+        return {**{k: p[k] for k in ("id", "template", "title", "executor", "smoke", "status", "error", "progress")}, "data": p.get("data"), "stages": stages, "final": p.get("final")}, f"pipeline {p['id']} · {p['status']} {p['progress']['done']}/{p['progress']['total']}", f"cortex://lab/pipeline/{p['id']}"
+    if name == "retry_stage":
+        from . import pipeline
+        p = pipeline.retry(str(a["id"]), str(a["stage"]))
+        return {"id": p["id"], "status": p["status"], "stages": [{"name": s["name"], "status": s["status"], "run_id": s.get("run_id")} for s in p["stages"]]}, f"retry {a['stage']} · {p['id']}", f"cortex://lab/pipeline/{p['id']}"
     if name == "run_agent":
         out = agents.run_capture(str(a["agent"]), str(a["task"]))
         return {"output": out}, f"{a['agent']}: {str(a['task'])[:70]}", ""
     raise ValueError(f"unknown tool {name}")
 
 
-WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code", "shell", "lab_plan_add", "lab_plan_remove", "gpu_benchmark", "plan_shots", "set_shot", "render_shot", "refresh_shot", "build_character", "plan_scene", "render_scene", "assemble_scene", "collect"}
+WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code", "shell", "lab_plan_add", "lab_plan_remove", "gpu_benchmark", "plan_shots", "set_shot", "render_shot", "refresh_shot", "build_character", "plan_scene", "render_scene", "assemble_scene", "collect", "start_pipeline", "retry_stage"}
 
 
 def system_prompt(channel: str) -> str:
@@ -503,7 +531,7 @@ def _context_line(ctx: dict | None) -> str:
         where = f"station '{cid}'" if cid else "the overview"
         return (f"\nOPEN IN THE APP RIGHT NOW: the Training Lab, {where}. The lab has in-browser stations (data, pretrain, midtrain, posttrain, encoder, cluster, paint) "
                 "that train a tiny transformer with tf.js, 15 teaching chapters (list_lab_chapters, then read_note on a slug like lab-05-preference-and-rl), "
-                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot; characters: list_characters, build_character; scenes: plan_scene, render_scene, assemble_scene), a data collector (collect, list_traces), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
+                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot; characters: list_characters, build_character; scenes: plan_scene, render_scene, assemble_scene), a data collector (collect, list_traces), training pipelines (the training pie: list_pipelines, start_pipeline, read_pipeline, retry_stage; Lab 21), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
                 "Link: cortex://lab")
     return ""
 

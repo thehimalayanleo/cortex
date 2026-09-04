@@ -59,6 +59,16 @@ export interface Scene { id: string; title: string; kind: "filler" | "full"; set
 export interface StudioBoard { logline: string; shots: Shot[]; counts: Record<string, number>; assets: string[]; characters: Character[]; scenes: Scene[] }
 export interface TraceIn { kind?: string; content?: string; data?: unknown; tags?: string[]; source?: string; context?: string; prompt?: string; response?: string; chosen?: string; rejected?: string; rating?: number }
 export interface TraceRec extends TraceIn { id: string; ts: number; when: string; kind: string; file?: string }
+export type PipelineStatus = "created" | "running" | "paused" | "done" | "failed";
+export type StageStatus = "pending" | "running" | "done" | "failed";
+export interface PipelineTemplate { name: string; title: string; doc: string; stages: { name: string; recipe: string; deps: string[] }[] }
+export interface PipelineStage {
+  name: string; recipe: string; deps: string[]; args_template: string; args: string | null; run_id: string | null; status: StageStatus;
+  started: string | null; ended: string | null; error: string | null; attempts: number;
+  run_status?: string | null; last?: Record<string, number> | null; result?: Record<string, unknown> | null; elapsed_s?: number | null;
+}
+export interface PipelineSummary { id: string; template: string; title: string; executor: string; smoke: boolean; status: PipelineStatus; created: string; updated: string; error: string | null; progress: { done: number; total: number }; current: string | null }
+export interface Pipeline extends PipelineSummary { out: string; stages: PipelineStage[]; data: { sources: Record<string, number>; total_tokens: number; tokenizer: string } | null; final: Record<string, unknown> | null }
 export interface TraceStats { total: number; by_kind: Record<string, number>; by_month: Record<string, number>; since: string | null; sft_pairs: number; dpo_pairs: number; root: string }
 
 export class ApiError extends Error {
@@ -267,6 +277,17 @@ export const api = {
     list: (p: { limit?: number; kind?: string; q?: string } = {}) => request<TraceRec[]>(`/traces${qs({ limit: p.limit, kind: p.kind, q: p.q })}`),
     stats: () => request<TraceStats>("/traces/stats"),
     exportUrl: (fmt: string) => `${BASE}/traces/export${qs({ fmt })}`,
+  },
+
+  pipelines: {
+    templates: () => request<PipelineTemplate[]>("/pipelines/templates"),
+    list: (limit = 50) => request<PipelineSummary[]>(`/pipelines${qs({ limit })}`),
+    get: (id: string) => request<Pipeline>(`/pipelines/${encodeURIComponent(id)}`),
+    create: (data: { template: string; executor?: string; smoke?: boolean; overrides?: Record<string, unknown>; start?: boolean }) => request<Pipeline>("/pipelines", { method: "POST", body: JSON.stringify(data) }),
+    start: (id: string) => request<Pipeline>(`/pipelines/${encodeURIComponent(id)}/start`, { method: "POST" }),
+    pause: (id: string) => request<Pipeline>(`/pipelines/${encodeURIComponent(id)}/pause`, { method: "POST" }),
+    retry: (id: string, stage: string) => request<Pipeline>(`/pipelines/${encodeURIComponent(id)}/retry/${encodeURIComponent(stage)}`, { method: "POST" }),
+    remove: (id: string, runs = false) => request<{ ok: boolean }>(`/pipelines/${encodeURIComponent(id)}${qs({ runs: runs ? "true" : "" })}`, { method: "DELETE" }),
   },
 
   telemetry: () => request<{ metrics: boolean; logs: boolean; mcp: boolean; grafana_url: string | null; queued: number; metrics_sent: number; logs_sent: number; errors: number; last_error: string | null }>("/telemetry"),

@@ -379,7 +379,7 @@ def real(args):
 
 def main():
     args = build_parser().parse_args()
-    d = dict(steps=60, group=4, batch=8, lr=2e-4, max_new=80) if args.smoke else dict(steps=200, group=8, batch=8, lr=1e-5, max_new=128)
+    d = dict(steps=60, group=4, batch=8, lr=2e-4, max_new=96) if args.smoke else dict(steps=200, group=8, batch=8, lr=1e-5, max_new=128)
     for k, v in d.items():
         if getattr(args, k) is None:
             setattr(args, k, v)

@@ -128,6 +128,7 @@ export interface ChatMessage {
 export type ChatEvent =
   | { type: "text"; delta: string }
   | { type: "tool"; id: string; name: string; input: unknown; status: ToolStatus; summary?: string; link?: string }
+  | { type: "client_tool"; id: string; name: string; input: Record<string, unknown> }
   | { type: "done"; message: ChatMessage }
   | { type: "error"; code: string; message: string };
 

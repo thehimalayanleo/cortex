@@ -12,6 +12,12 @@ import { useToast } from "./Toast";
 import { Popover } from "./Popover";
 import type { WebMCPCall } from "../lib/webmcp";
 
+type SpeechRec = {
+  lang: string; interimResults: boolean; continuous: boolean;
+  onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+  onend: (() => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void;
+};
+
 /** What the center pane shows right now plus the active space, so "this paper" and "these papers" resolve on the server. */
 function chatContext(space: string): { kind?: string; id?: string; space: string } {
   const r = parseHash(location.hash);
@@ -71,6 +77,37 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
   const [items, setItems] = useState<Item[]>([]);
   const [loadState, setLoadState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
   const [draft, setDraft] = useState("");
+  // Voice mode: the browser's own speech recognition dictates into the composer (and sends on a final result);
+  // replies can be read aloud with speechSynthesis. Chrome only for recognition; no audio leaves the page otherwise.
+  const [listening, setListening] = useState(false);
+  const [speakPref, setSpeakPref] = useLocalStorage<"on" | "off">("cortex.chat.speak", "off");
+  const speakRef = useRef(speakPref === "on");
+  speakRef.current = speakPref === "on";
+  const recRef = useRef<{ stop: () => void } | null>(null);
+  const speechSupported = typeof window !== "undefined" && !!((window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition || (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition);
+  const speak = (text: string) => {
+    if (!("speechSynthesis" in window)) return;
+    const plain = text.replace(/```[\s\S]*?```/g, " code block ").replace(/[*_`#>\[\]()]/g, " ").replace(/\$[^$]*\$/g, " formula ").replace(/\s+/g, " ").slice(0, 1500);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(plain));
+  };
+  const toggleListen = () => {
+    if (listening) { recRef.current?.stop(); return; }
+    const W = window as unknown as { webkitSpeechRecognition?: new () => SpeechRec; SpeechRecognition?: new () => SpeechRec };
+    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false;
+    let finalText = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) { const r = e.results[i]; if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript; }
+      setDraft((finalText + interim).trim());
+    };
+    rec.onend = () => { setListening(false); recRef.current = null; if (finalText.trim()) { window.speechSynthesis?.cancel(); void sendText(finalText.trim()); } };
+    rec.onerror = () => { setListening(false); recRef.current = null; };
+    recRef.current = rec; setListening(true); rec.start();
+  };
   const [streaming, setStreaming] = useState<{ id: string; ac: AbortController } | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -141,8 +178,9 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
     setItems((xs) => xs.map((it) => (it.kind === "agent" && it.run.id === id ? { kind: "agent", run: fn(it.run) } : it)));
   }, []);
 
-  const send = async () => {
-    const content = draft.trim();
+  const sendText = async (text: string) => { setDraft(text); await send(text); };
+  const send = async (override?: string) => {
+    const content = (override ?? draft).trim();
     if (!content || streaming) return;
     setDraft("");
     const now = new Date().toISOString();
@@ -174,8 +212,25 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
               else trace[idx] = { ...trace[idx], ...row };
               return { ...m, msg: { ...m.msg, trace } };
             });
+          } else if (ev.type === "client_tool") {
+            // The model asked for something that lives in this page (open_lab, lab_train, lab_status): run the same
+            // tool body a browser agent would call, then hand the result back to the server-side loop.
+            const w = window as unknown as { cortex?: { call: (n: string, i: Record<string, unknown>) => Promise<{ content: { text: string }[] }> } };
+            const run = async () => {
+              let result: unknown;
+              try {
+                const r = await w.cortex!.call(ev.name, ev.input ?? {});
+                const txt = r.content?.[0]?.text ?? "";
+                try { result = JSON.parse(txt); } catch { result = txt; }
+              } catch (e) {
+                result = { error: errorMessage(e) };
+              }
+              await api.chatToolResult(ev.id, result);
+            };
+            void run();
           } else if (ev.type === "done") {
             patchMsg(asstId, (m) => ({ ...m, pending: false, msg: { ...ev.message, id: ev.message?.id ?? asstId, trace: ev.message?.trace ?? m.msg.trace } }));
+            if (speakRef.current && ev.message?.content) speak(ev.message.content);
           } else if (ev.type === "error") {
             patchMsg(asstId, (m) => ({ ...m, pending: false, error: `${ev.code ? `${ev.code}: ` : ""}${ev.message}` }));
           }
@@ -362,8 +417,16 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
         <div className="composer">
           <textarea ref={composerRef} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onComposerKey} placeholder={space === "all" ? "Message" : `Message ${spaceName}`} aria-label="Message" rows={3} />
           <div className="bar">
-            <span className="hint">Enter sends, Shift+Enter for a new line</span>
+            <span className="hint">{listening ? "Listening… speak, then pause to send" : "Enter sends, Shift+Enter for a new line"}</span>
             <span className="grow" />
+            {speechSupported && (
+              <button className={`btn sm ${listening ? "danger" : ""}`} onClick={toggleListen} title={listening ? "Stop listening" : "Dictate (voice mode)"} aria-pressed={listening}>
+                {listening ? "● Stop" : "🎙 Talk"}
+              </button>
+            )}
+            <button className="btn sm" onClick={() => { const v = speakPref === "on" ? "off" : "on"; setSpeakPref(v); if (v === "off") window.speechSynthesis?.cancel(); }} title="Read replies aloud" aria-pressed={speakPref === "on"}>
+              {speakPref === "on" ? "🔊 Speaking" : "🔈 Speak"}
+            </button>
             {streaming ? (
               <button className="btn sm danger" onClick={stop}>
                 Stop

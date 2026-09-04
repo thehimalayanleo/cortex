@@ -352,6 +352,16 @@ def models():
     return chat.list_models()
 
 
+class ToolResultIn(BaseModel):
+    result: Any = None
+
+
+@app.post("/api/chat/tool_result/{cid}")
+def chat_tool_result(cid: str, r: ToolResultIn):
+    """The page reports the outcome of a client-executed tool (open_lab, lab_train, lab_status)."""
+    return {"ok": chat.client_tool_result(cid, r.result)}
+
+
 @app.get("/api/chat/{channel}")
 def chat_get(channel: str):
     return vault.read_chat(channel)

@@ -207,6 +207,8 @@ export const api = {
       stream<ChatEvent>(`/chat/${encodeURIComponent(channel)}`, data, onEvent, signal),
   },
 
+  chatToolResult: (id: string, result: unknown) => request<{ ok: boolean }>(`/chat/tool_result/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ result }) }),
+
   models: () => request<ModelInfo[]>("/models"),
 
   lab: {

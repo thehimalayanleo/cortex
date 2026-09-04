@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import os
 import time
 import uuid
@@ -76,6 +77,12 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "kind": {"type": "string"}, "body": {"type": "string"}, "topics": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "body"]}}},
     {"type": "function", "function": {"name": "append_daily", "description": "Append a line or paragraph to today's daily page.",
         "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}},
+    {"type": "function", "function": {"name": "open_lab", "description": "Open the Training Lab in the app at a station: overview|data|pretrain|midtrain|posttrain|encoder|cluster|paint|speculative|moe. Runs in the user's browser.",
+        "parameters": {"type": "object", "properties": {"station": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "lab_train", "description": "Train the in-browser lab model at a station while the user watches: station pretrain|midtrain|sft|dpo|encoder|contrastive|cluster|paint|speculative|moe (speculative and moe need pretrain first), steps optional. Returns at once; call lab_status a few seconds later to read loss, samples, reward, blank rate.",
+        "parameters": {"type": "object", "properties": {"station": {"type": "string"}, "steps": {"type": "integer"}}, "required": ["station"]}}},
+    {"type": "function", "function": {"name": "lab_status", "description": "Read the live state of the in-browser lab: per-station step, loss, samples, purity, reward, KL. Runs in the user's browser.",
+        "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "list_lab_chapters", "description": "List the Training Lab chapters (the curriculum: data, pretraining, mid-training, SFT, RL, tool use, embeddings, clustering, evals, red-teaming, architecture, optimizers, GPU/KV cache, Lean, paint-with-code). Each is a note with slug lab-NN-name; read one with read_note.",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "gpu_status", "description": "Check the user's GPU box (the home RTX 5090 over Tailscale): reachable, GPU name and memory, whether PyTorch is ready, whether a run is in progress. Call before start_run on the ssh executor.",
@@ -193,6 +200,39 @@ def extract_highlights(pid: str, model: str | None = None, force: bool = False, 
     result = {"id": pid, "model": model or DEFAULT_MODEL, "generated": time.strftime("%Y-%m-%dT%H:%M:%S"), "items": out[:12], "scope": scope, "pages_total": len(all_pages)}
     vault.write_highlights(pid, result)
     return result
+
+
+# Tools that execute inside the page (the same WebMCP tools a browser agent calls). The stream yields a
+# client_tool event, the app runs window.cortex.call(name, input), and posts the result back here.
+CLIENT_TOOLS = {"open_lab", "lab_train", "lab_status"}
+_pending: dict[str, dict] = {}
+_pending_lock = threading.Lock()
+
+
+def client_tool_result(cid: str, result: object) -> bool:
+    with _pending_lock:
+        slot = _pending.get(cid)
+    if not slot:
+        return False
+    slot["result"] = result
+    slot["event"].set()
+    return True
+
+
+def _exec_client(cid: str, name: str, args: dict, timeout: float = 25.0) -> tuple[object, str, str]:
+    slot = {"event": threading.Event(), "result": None}
+    with _pending_lock:
+        _pending[cid] = slot
+    try:
+        if not slot["event"].wait(timeout):
+            raise ValueError(f"{name}: the page did not answer in {int(timeout)} s (is the app open in a browser?)")
+    finally:
+        with _pending_lock:
+            _pending.pop(cid, None)
+    r = slot["result"]
+    if isinstance(r, dict) and r.get("error"):
+        raise ValueError(str(r["error"])[:200])
+    return r, f"{name} · {str(args.get('station') or '')}".strip(" ·"), "cortex://lab"
 
 
 def _exec(name: str, a: dict) -> tuple[object, str, str]:
@@ -401,8 +441,10 @@ def stream(channel: str, content: str, model: str | None = None, context: dict |
                 except json.JSONDecodeError:
                     args = {}
                 yield {"type": "tool", "id": cid, "name": c["name"], "input": args, "status": "running"}
+                if c["name"] in CLIENT_TOOLS:
+                    yield {"type": "client_tool", "id": cid, "name": c["name"], "input": args}
                 try:
-                    result, summary, link = _exec(c["name"], args)
+                    result, summary, link = _exec_client(cid, c["name"], args) if c["name"] in CLIENT_TOOLS else _exec(c["name"], args)
                     ev = {"type": "tool", "id": cid, "name": c["name"], "input": args, "status": "ok", "summary": summary, "link": link, "write": c["name"] in WRITE_TOOLS}
                     payload = json.dumps(result, ensure_ascii=False)[:16000]
                 except Exception as e:  # tool errors go back to the model, not to the user as a crash

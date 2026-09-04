@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import galaxy, agents, chat, pipeline, runs, studio, telemetry, traces, vault
+from . import arm, galaxy, agents, chat, pipeline, runs, studio, telemetry, traces, vault
 
 app = FastAPI(title="Cortex", version="0.1")
 
@@ -891,6 +891,134 @@ def galaxy_rebuild(smoke: bool = False):
         return galaxy.rebuild(smoke)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+# ---------------------------------------------------------------- physical AI: the SO-ARM101
+
+class ArmJoints(BaseModel):
+    joints: dict[str, float]
+    seconds: float | None = None
+
+
+class ArmConnect(BaseModel):
+    port: str = ""
+    sim: bool = False
+    executor: str = "local"
+
+
+class ArmPose(BaseModel):
+    name: str
+    joints: dict[str, float] | None = None
+
+
+class ArmRecord(BaseModel):
+    task: str = ""
+    fps: int = 10
+
+
+class ArmPlan(BaseModel):
+    instruction: str
+    execute: bool = False
+
+
+@app.get("/api/arm")
+def arm_status():
+    return arm.status()
+
+
+@app.post("/api/arm/connect")
+def arm_connect(c: ArmConnect):
+    try:
+        return arm.connect(c.port, c.sim, c.executor)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/arm/disconnect")
+def arm_disconnect():
+    return arm.disconnect()
+
+
+@app.post("/api/arm/joints")
+def arm_joints(j: ArmJoints):
+    return arm.goto(j.joints, j.seconds) if j.seconds else arm.set_joints(j.joints)
+
+
+@app.post("/api/arm/stop")
+def arm_stop():
+    return arm.stop_motion()
+
+
+@app.post("/api/arm/poses")
+def arm_save_pose(p: ArmPose):
+    return arm.save_pose(p.name, p.joints)
+
+
+@app.delete("/api/arm/poses/{name}")
+def arm_remove_pose(name: str):
+    try:
+        return arm.remove_pose(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/arm/goto/{name}")
+def arm_goto_pose(name: str, seconds: float = 1.2):
+    st = arm.status()
+    if name not in st["poses"]:
+        raise HTTPException(404, "no such pose")
+    return arm.goto(st["poses"][name], seconds)
+
+
+@app.get("/api/arm/episodes")
+def arm_episodes():
+    return arm.list_episodes()
+
+
+@app.get("/api/arm/episodes/{eid}")
+def arm_episode(eid: str):
+    try:
+        return arm.episode(_safe_name(eid))
+    except KeyError:
+        raise HTTPException(404, "no such episode")
+
+
+@app.delete("/api/arm/episodes/{eid}")
+def arm_episode_remove(eid: str):
+    arm.remove_episode(_safe_name(eid))
+    return {"ok": True}
+
+
+@app.post("/api/arm/record/start")
+def arm_record_start(r: ArmRecord):
+    try:
+        return arm.record_start(r.task, r.fps)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/arm/record/stop")
+def arm_record_stop():
+    try:
+        return arm.record_stop()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/arm/episodes/{eid}/play")
+def arm_play(eid: str, speed: float = 1.0):
+    try:
+        return arm.play(_safe_name(eid), speed)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/arm/plan")
+def arm_plan(p: ArmPlan):
+    try:
+        return arm.plan(p.instruction, p.execute)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
 
 
 @app.get("/api/telemetry")

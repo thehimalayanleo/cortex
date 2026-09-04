@@ -154,6 +154,16 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "stage": {"type": "string"}}, "required": ["id", "stage"]}}},
     {"type": "function", "function": {"name": "search_arxiv", "description": "Search arXiv on the web by topic when the vault has nothing (or too little). Returns up to n results with arxiv id, title, authors, year, summary, and whether it is already in the library. Follow with file_paper(arxiv=<id>) to import one.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "n": {"type": "integer"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "arm_status", "description": "The SO-ARM101 desk robot arm in the Lab (physical AI): mode sim|hardware|offline, joint angles in degrees, end-effector position (metres), named poses, serial ports seen, whether it is recording or moving, which planner (Nemotron on Nebius when configured).",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "arm_move", "description": "Move the arm: give joints {shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper} in degrees (partial ok) or a pose name from arm_status. Eases over `seconds` (default 1.2). Connect first with arm_connect if mode is offline.",
+        "parameters": {"type": "object", "properties": {"joints": {"type": "object"}, "pose": {"type": "string"}, "seconds": {"type": "number"}}}}},
+    {"type": "function", "function": {"name": "arm_connect", "description": "Start the arm bridge: sim=true emulates the servos (works anywhere); otherwise give a serial port from arm_status.ports for the real Feetech bus.",
+        "parameters": {"type": "object", "properties": {"port": {"type": "string"}, "sim": {"type": "boolean"}}}}},
+    {"type": "function", "function": {"name": "arm_record", "description": "Record an episode (LeRobot-style frames of joints at fps) while the arm moves: action start (with a task description) or stop. Or list to see episodes, play with an id to replay one.",
+        "parameters": {"type": "object", "properties": {"action": {"type": "string", "enum": ["start", "stop", "list", "play"]}, "task": {"type": "string"}, "id": {"type": "string"}}, "required": ["action"]}}},
+    {"type": "function", "function": {"name": "arm_plan", "description": "Turn an instruction ('wave hello', 'reach to the left and open the gripper') into 2-8 joint waypoints with the planner model and, when execute=true, run them on the arm. Returns the waypoints with end-effector positions.",
+        "parameters": {"type": "object", "properties": {"instruction": {"type": "string"}, "execute": {"type": "boolean"}}, "required": ["instruction"]}}},
     {"type": "function", "function": {"name": "galaxy", "description": "The library as a map: universes (broad areas) containing solar systems (tight clusters of papers) with labels and sizes, computed by embedding every paper (bge-small) and clustering (DBSCAN). Give a solar system id to list its papers. Use to answer 'what areas does my library cover' or 'which papers sit near X'.",
         "parameters": {"type": "object", "properties": {"system": {"type": "integer"}}}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
@@ -312,6 +322,41 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
     if name == "append_daily":
         n = vault.append_daily(str(a["text"]))
         return {"slug": n["slug"]}, str(a["text"])[:80], f"cortex://note/{n['slug']}"
+    if name == "arm_status":
+        from . import arm
+        st = arm.status()
+        return st, f"arm · {st['mode']} · tip {st['fk']['tip']}", "cortex://lab/arm"
+    if name == "arm_move":
+        from . import arm
+        st = arm.status()
+        target = dict(st["poses"].get(str(a.get("pose") or ""), {}))
+        target.update({k: float(v) for k, v in (a.get("joints") or {}).items()})
+        if not target:
+            raise ValueError("give joints or a pose")
+        st = arm.goto(target, float(a.get("seconds") or 1.2))
+        return st, f"arm moving to {json.dumps({k: round(v) for k, v in target.items()})}", "cortex://lab/arm"
+    if name == "arm_connect":
+        from . import arm
+        m = arm.connect(str(a.get("port") or ""), bool(a.get("sim")))
+        return m, f"arm bridge run {m.get('id')}", "cortex://lab/arm"
+    if name == "arm_record":
+        from . import arm
+        act = a.get("action")
+        if act == "start":
+            m = arm.record_start(str(a.get("task") or ""))
+            return m, f"recording episode {m['id']}", "cortex://lab/arm"
+        if act == "stop":
+            m = arm.record_stop()
+            return {k: v for k, v in m.items() if k != "frames_data"}, f"episode {m['id']} · {m.get('frames')} frames", "cortex://lab/arm"
+        if act == "play":
+            st = arm.play(str(a.get("id")))
+            return st, f"playing {a.get('id')}", "cortex://lab/arm"
+        eps = arm.list_episodes()
+        return eps, f"{len(eps)} episodes", "cortex://lab/arm"
+    if name == "arm_plan":
+        from . import arm
+        out = arm.plan(str(a["instruction"]), bool(a.get("execute")))
+        return out, f"{len(out['waypoints'])} waypoints · {out['planner']}" + (" · executing" if out["executed"] else ""), "cortex://lab/arm"
     if name == "galaxy":
         from . import galaxy
         if a.get("system") is not None:
@@ -540,7 +585,7 @@ def _context_line(ctx: dict | None) -> str:
         where = f"station '{cid}'" if cid else "the overview"
         return (f"\nOPEN IN THE APP RIGHT NOW: the Training Lab, {where}. The lab has in-browser stations (data, pretrain, midtrain, posttrain, encoder, cluster, paint) "
                 "that train a tiny transformer with tf.js, 15 teaching chapters (list_lab_chapters, then read_note on a slug like lab-05-preference-and-rl), "
-                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot; characters: list_characters, build_character; scenes: plan_scene, render_scene, assemble_scene), a data collector (collect, list_traces), training pipelines (the training pie: list_pipelines, start_pipeline, read_pipeline, retry_stage; Lab 21), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
+                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot; characters: list_characters, build_character; scenes: plan_scene, render_scene, assemble_scene), a data collector (collect, list_traces), a physical-AI arm (arm_status, arm_connect, arm_move, arm_record, arm_plan; Lab tab Physical), training pipelines (the training pie: list_pipelines, start_pipeline, read_pipeline, retry_stage; Lab 21), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
                 "Link: cortex://lab")
     return ""
 

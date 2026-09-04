@@ -71,6 +71,9 @@ export interface PipelineSummary { id: string; template: string; title: string; 
 export interface Pipeline extends PipelineSummary { out: string; stages: PipelineStage[]; data: { sources: Record<string, number>; total_tokens: number; tokenizer: string } | null; final: Record<string, unknown> | null }
 export interface TraceStats { total: number; by_kind: Record<string, number>; by_month: Record<string, number>; since: string | null; sft_pairs: number; dpo_pairs: number; root: string }
 
+export interface ArmStatus { joints: Record<string, number>; target: Record<string, number>; mode: string; bridge: string | null; port: string; ports: string[]; poses: Record<string, Record<string, number>>; limits: Record<string, [number, number]>; links: Record<string, number>; joint_names: string[]; fk: { points: number[][]; tip: number[]; reach_m: number }; recording: string | null; moving: string | null; host: string; planner: string; episodes: number }
+export interface ArmEpisode { id: string; task: string; fps: number; joint_names: string[]; started: string; frames: number; seconds?: number; mode?: string; frames_data?: { t: number; joints: Record<string, number>; target?: Record<string, number>; tip: number[] }[] }
+export interface ArmPlanOut { instruction: string; waypoints: { name: string; joints: Record<string, number>; seconds: number; tip: number[] }[]; note: string; planner: string; executed: boolean }
 export interface GalaxyPaper { id: string; title: string; year?: number | null; status?: string; topics?: string[]; authors?: string; x: number; y: number; x3: number; y3: number; z3: number; cluster: number; hood?: number; universe: number; near?: [string, number][] }
 export interface GalaxyCluster { id: number; label: string; size: number; cx: number; cy: number; r?: number; universe: number }
 export interface GalaxyUniverse { id: number; label: string; clusters: number[]; size: number; cx?: number; cy?: number; r?: number }
@@ -242,6 +245,23 @@ export const api = {
 
   chatToolResult: (id: string, result: unknown) => request<{ ok: boolean }>(`/chat/tool_result/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ result }) }),
 
+  arm: {
+    status: () => request<ArmStatus>("/arm"),
+    connect: (port = "", sim = false) => request<{ id: string }>("/arm/connect", { method: "POST", body: JSON.stringify({ port, sim }) }),
+    disconnect: () => request<ArmStatus>("/arm/disconnect", { method: "POST" }),
+    joints: (joints: Record<string, number>, seconds?: number) => request<ArmStatus>("/arm/joints", { method: "POST", body: JSON.stringify({ joints, seconds }) }),
+    stop: () => request<ArmStatus>("/arm/stop", { method: "POST" }),
+    savePose: (name: string, joints?: Record<string, number>) => request<Record<string, Record<string, number>>>("/arm/poses", { method: "POST", body: JSON.stringify({ name, joints }) }),
+    removePose: (name: string) => request<Record<string, Record<string, number>>>(`/arm/poses/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    goto: (name: string, seconds = 1.2) => request<ArmStatus>(`/arm/goto/${encodeURIComponent(name)}?seconds=${seconds}`, { method: "POST" }),
+    episodes: () => request<ArmEpisode[]>("/arm/episodes"),
+    episode: (id: string) => request<ArmEpisode>(`/arm/episodes/${encodeURIComponent(id)}`),
+    removeEpisode: (id: string) => request<{ ok: boolean }>(`/arm/episodes/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    recordStart: (task: string) => request<ArmEpisode>("/arm/record/start", { method: "POST", body: JSON.stringify({ task }) }),
+    recordStop: () => request<ArmEpisode>("/arm/record/stop", { method: "POST" }),
+    play: (id: string, speed = 1) => request<ArmStatus>(`/arm/episodes/${encodeURIComponent(id)}/play?speed=${speed}`, { method: "POST" }),
+    plan: (instruction: string, execute: boolean) => request<ArmPlanOut>("/arm/plan", { method: "POST", body: JSON.stringify({ instruction, execute }) }),
+  },
   studio: {
     board: () => request<StudioBoard>("/studio"),
     plan: (logline: string, n = 4) => request<{ shots: Shot[]; board: StudioBoard }>("/studio/plan", { method: "POST", body: JSON.stringify({ logline, n }) }),

@@ -12,6 +12,7 @@ import { useAsync } from "../lib/hooks";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
 import { StudioView } from "./StudioView";
+import { ArmView } from "./ArmView";
 import { TracesView } from "./TracesView";
 import { PipelineView } from "./PipelineView";
 
@@ -61,26 +62,27 @@ export function labMessage(msg: Record<string, unknown>, timeoutMs = 4000): Prom
   });
 }
 
-type LabTab = "stations" | "chapters" | "runs" | "plan" | "terminal" | "studio" | "traces" | "pipeline";
+type LabTab = "stations" | "chapters" | "runs" | "plan" | "terminal" | "studio" | "arm" | "traces" | "pipeline";
 
-export function LabView({ station, runId, plan, terminal, studio, traces, pipeline, pipelineId, refresh }: { station?: string; runId?: string; plan?: boolean; terminal?: boolean; studio?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string; refresh: number }) {
-  const [tab, setTab] = useState<LabTab>(pipeline ? "pipeline" : studio ? "studio" : traces ? "traces" : terminal ? "terminal" : plan ? "plan" : runId != null ? "runs" : "stations");
+export function LabView({ station, runId, plan, terminal, studio, arm, traces, pipeline, pipelineId, refresh }: { station?: string; runId?: string; plan?: boolean; terminal?: boolean; studio?: boolean; arm?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string; refresh: number }) {
+  const [tab, setTab] = useState<LabTab>(pipeline ? "pipeline" : studio ? "studio" : arm ? "arm" : traces ? "traces" : terminal ? "terminal" : plan ? "plan" : runId != null ? "runs" : "stations");
   useEffect(() => {
     if (pipeline) setTab("pipeline");
     else if (studio) setTab("studio");
+    else if (arm) setTab("arm");
     else if (traces) setTab("traces");
     else if (terminal) setTab("terminal");
     else if (plan) setTab("plan");
     else if (runId != null) setTab("runs");
     else if (station) setTab("stations");
-  }, [runId, plan, station, terminal, studio, traces, pipeline]);
+  }, [runId, plan, station, terminal, studio, arm, traces, pipeline]);
   const chapters = useAsync(() => api.lab.chapters(), [], [refresh]);
 
   return (
     <section className="lab-view">
       <header className="lab-head">
         <div className="lab-tabs" role="tablist">
-          {(["plan", "stations", "chapters", "runs", "pipeline", "terminal", "studio", "traces"] as const).map((t) => (
+          {(["plan", "stations", "chapters", "runs", "pipeline", "terminal", "studio", "arm", "traces"] as const).map((t) => (
             <button
               key={t}
               role="tab"
@@ -88,10 +90,10 @@ export function LabView({ station, runId, plan, terminal, studio, traces, pipeli
               aria-selected={tab === t}
               onClick={() => {
                 setTab(t);
-                navigate(t === "plan" ? { kind: "lab", plan: true } : t === "pipeline" ? { kind: "lab", pipeline: true } : t === "studio" ? { kind: "lab", studio: true } : t === "traces" ? { kind: "lab", traces: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
+                navigate(t === "plan" ? { kind: "lab", plan: true } : t === "pipeline" ? { kind: "lab", pipeline: true } : t === "studio" ? { kind: "lab", studio: true } : t === "arm" ? { kind: "lab", arm: true } : t === "traces" ? { kind: "lab", traces: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
               }}
             >
-              {t === "plan" ? "My plan" : t === "pipeline" ? "Pipeline" : t === "stations" ? "In the browser" : t === "chapters" ? `Chapters${chapters.data ? ` · ${chapters.data.length}` : ""}` : t === "terminal" ? "Terminal" : t === "studio" ? "Studio" : t === "traces" ? "Traces" : "GPU runs"}
+              {t === "plan" ? "My plan" : t === "pipeline" ? "Pipeline" : t === "stations" ? "In the browser" : t === "chapters" ? `Chapters${chapters.data ? ` · ${chapters.data.length}` : ""}` : t === "terminal" ? "Terminal" : t === "studio" ? "Studio" : t === "arm" ? "Physical" : t === "traces" ? "Traces" : "GPU runs"}
             </button>
           ))}
         </div>
@@ -114,6 +116,7 @@ export function LabView({ station, runId, plan, terminal, studio, traces, pipeli
       {tab === "plan" && <Plan refresh={refresh} />}
       {tab === "terminal" && <Terminal />}
       {tab === "studio" && <StudioView refresh={refresh} />}
+      {tab === "arm" && <ArmView refresh={refresh} />}
       {tab === "traces" && <TracesView refresh={refresh} />}
       {tab === "pipeline" && <PipelineView pipelineId={pipelineId} refresh={refresh} />}
     </section>

@@ -826,3 +826,29 @@
 .galaxy-tree .tree-p:hover{background:var(--panel-2)}
 .galaxy-tree .tree-p.read{font-weight:600}
 .galaxy-tree .tree-p .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+
+/* ---------------------------------------------------------------- physical AI: the arm */
+.arm{display:flex;flex-direction:column;gap:12px;padding:12px 16px;flex:1;min-height:0;overflow:auto}
+.arm-top{display:grid;grid-template-columns:minmax(0,3fr) minmax(300px,2fr);gap:12px;min-height:380px}
+.arm-stage{position:relative;border:1.5px solid var(--line);border-radius:12px;overflow:hidden;background:radial-gradient(ellipse at 50% 70%,var(--panel) 0%,var(--bg) 75%);min-height:380px}
+.arm-canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+.arm-status{position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:70%}
+.arm-status .pill{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font:11.5px var(--mono);color:var(--muted);background:color-mix(in srgb,var(--bg) 85%,transparent);white-space:nowrap}
+.arm-status .small{background:color-mix(in srgb,var(--bg) 85%,transparent);border-radius:6px;padding:2px 6px}
+.arm-status .pill.ok{color:var(--accent-text);border-color:var(--accent)}
+.arm-status .pill.sim{color:var(--ink)}
+.arm-panel{display:flex;flex-direction:column;gap:12px}
+.arm-card{border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--panel);display:flex;flex-direction:column;gap:8px}
+.arm-card .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.arm-card .input{flex:1;min-width:200px}
+.arm-slider{display:grid;grid-template-columns:52px 1fr 52px;align-items:center;gap:8px;font-size:12.5px}
+.arm-slider .jn{color:var(--muted);font:11.5px var(--mono)}
+.arm-slider .jv{text-align:right;font-size:12px}
+.arm-slider input[type=range]{width:100%;accent-color:var(--accent)}
+.arm-bottom{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.arm-plan{display:flex;flex-direction:column;gap:4px}
+.arm-plan .wp{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--ink);cursor:pointer;font:12.5px var(--sans)}
+.arm-plan .wp:hover{border-color:var(--accent)}
+.arm-episodes{display:flex;flex-direction:column;gap:4px}
+.arm-episodes .ep{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:5px 10px;background:var(--bg);font-size:12.5px}
+@media (max-width:1500px){.arm-top,.arm-bottom{grid-template-columns:1fr}.arm-stage{min-height:420px}}

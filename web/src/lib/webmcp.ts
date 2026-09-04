@@ -132,6 +132,28 @@ export const webmcpTools: ModelContextTool[] = [
     },
   },
   {
+    name: "arm",
+    description: "The SO-ARM101 desk robot arm in the Lab (physical AI). action: status | connect (sim or a serial port) | move (joints in degrees or a pose name) | plan (instruction → waypoints; execute to run them) | record_start (task) | record_stop | play (episode id). Opens the Physical tab.",
+    inputSchema: { type: "object", properties: { action: { type: "string" }, joints: { type: "object" }, pose: { type: "string" }, instruction: { type: "string" }, execute: { type: "boolean" }, port: { type: "string" }, task: { type: "string" }, id: { type: "string" } }, required: ["action"] },
+    execute: async (i) => {
+      navigate({ kind: "lab", arm: true });
+      const action = String(i.action ?? "status");
+      let out: unknown;
+      if (action === "connect") out = await api.arm.connect(String(i.port ?? ""), !i.port);
+      else if (action === "move") {
+        const st = await api.arm.status();
+        const joints = { ...(i.pose ? st.poses[String(i.pose)] ?? {} : {}), ...((i.joints as Record<string, number>) ?? {}) };
+        out = await api.arm.joints(joints, 1.2);
+      } else if (action === "plan") out = await api.arm.plan(String(i.instruction ?? ""), !!i.execute);
+      else if (action === "record_start") out = await api.arm.recordStart(String(i.task ?? ""));
+      else if (action === "record_stop") out = await api.arm.recordStop();
+      else if (action === "play") out = await api.arm.play(String(i.id ?? ""));
+      else out = await api.arm.status();
+      record("arm", i, true, action);
+      return text(out);
+    },
+  },
+  {
     name: "galaxy",
     description: "The library as a map: universes (broad areas) containing solar systems (tight clusters of papers), labelled and sized; opens the Galaxy view. Give system to list that solar system's papers.",
     inputSchema: { type: "object", properties: { system: { type: "integer" } } },

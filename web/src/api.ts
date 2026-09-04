@@ -35,6 +35,8 @@ export interface LabPlan { columns: PlanCol[]; cards: PlanCard[]; done: number; 
 export interface GpuStatus {
   host: string | null; reachable: boolean; ready: boolean; message?: string; busy?: boolean; torch?: string; cuda?: boolean; python?: string;
   gpu?: { name: string; memory_total: string; memory_used: string; utilization: string };
+  ssh_round_trip_ms?: number;
+  tailscale?: { ip: string | null; os?: string | null; link?: string; state?: string } | null;
 }
 export type GpuSetupEvent = { type: "log"; lines: string[] } | { type: "status"; status: "done" | "failed"; exit: number; gpu: GpuStatus | null } | { type: "error"; message: string };
 export interface LabChapter { slug: string; file: string; title?: string; chapter?: number; station?: string; recipe?: string; reading_time?: string }

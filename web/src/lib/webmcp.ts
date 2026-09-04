@@ -229,7 +229,7 @@ export const webmcpTools: ModelContextTool[] = [
   },
   {
     name: "gpu_status",
-    description: "Check the user's GPU box (the home RTX 5090 over Tailscale): reachable, GPU name and memory, whether PyTorch is ready, whether a run is in progress. Call before start_run with executor ssh.",
+    description: "Check the user's GPU box (the home RTX 5090 over Tailscale): reachable, Tailscale IP and whether the link is direct, SSH round trip, GPU name and memory, whether PyTorch is ready, whether a run is in progress. Call before start_run with executor ssh.",
     inputSchema: { type: "object", properties: {} },
     annotations: { readOnlyHint: true },
     execute: async (i) => {
@@ -237,6 +237,16 @@ export const webmcpTools: ModelContextTool[] = [
       const g = await api.lab.gpu();
       record("gpu_status", i, g.reachable, g.message ?? "");
       return text(g);
+    },
+  },
+  {
+    name: "gpu_benchmark",
+    description: "Prove the GPU link end to end: run the kernel_bench recipe on the user's RTX 5090 over Tailscale SSH (matmul and attention throughput, KV-cache bytes) and open the run so the person watches the numbers stream in.",
+    inputSchema: { type: "object", properties: {} },
+    execute: async (i) => {
+      const r = await api.lab.start({ recipe: "kernel_bench", args: "", executor: "ssh" });
+      changed(); navigate({ kind: "lab", run: r.id }); record("gpu_benchmark", i, true, `kernel_bench · ${r.id}`);
+      return text(r);
     },
   },
   {

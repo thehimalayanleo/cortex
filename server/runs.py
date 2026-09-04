@@ -155,6 +155,24 @@ def _ssh_python() -> str:
     return os.environ.get("CORTEX_SSH_PYTHON", "$HOME/lab-venv/bin/python")
 
 
+def _tailscale_peer(host: str) -> dict[str, Any] | None:
+    """How the box is reached: its Tailscale IP, OS, and whether the link is direct or relayed (from `tailscale status`)."""
+    for exe in (shutil.which("tailscale"), "/Applications/Tailscale.app/Contents/MacOS/Tailscale"):
+        if not exe or not Path(exe).exists():
+            continue
+        try:
+            r = subprocess.run([exe, "status"], capture_output=True, text=True, timeout=8)
+        except Exception:
+            continue
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == host:
+                state = line.split(None, 4)[4] if len(line.split(None, 4)) > 4 else ""
+                return {"ip": parts[0], "os": parts[3] if len(parts) > 3 else None, "link": "direct" if "direct" in state else ("relayed" if "relay" in state else ("active" if "active" in state else "idle")), "state": state.strip()}
+        return {"ip": None, "state": "not in this tailnet's peer list"}
+    return None
+
+
 def gpu_status() -> dict[str, Any]:
     """One SSH round trip: is the box reachable, what GPU, is the venv ready."""
     host = _ssh_host()
@@ -166,6 +184,7 @@ def gpu_status() -> dict[str, Any]:
         f"if [ -x {py} ]; then {py} -c \"import torch;print('TORCH', torch.__version__, torch.cuda.is_available())\" 2>&1 | tail -1; else echo NOVENV; fi; "
         "pgrep -f '[c]ortex-lab/recipes/[a-z_]*[.]py' >/dev/null && echo BUSY || echo IDLE"
     )
+    t0 = time.time()
     try:
         r = subprocess.run(["ssh", *SSH_OPTS, host, probe], capture_output=True, text=True, timeout=25)
     except subprocess.TimeoutExpired:
@@ -181,7 +200,7 @@ def gpu_status() -> dict[str, Any]:
     torch_line = next((l for l in lines if l.startswith("TORCH")), None)
     novenv = any(l == "NOVENV" for l in lines)
     busy = any(l == "BUSY" for l in lines)
-    out: dict[str, Any] = {"host": host, "reachable": True, "python": py, "busy": busy}
+    out: dict[str, Any] = {"host": host, "reachable": True, "python": py, "busy": busy, "ssh_round_trip_ms": int((time.time() - t0) * 1000), "tailscale": _tailscale_peer(host)}
     if gpu:
         name, total, used, util = [x.strip() for x in gpu.split(",")][:4]
         out["gpu"] = {"name": name, "memory_total": total, "memory_used": used, "utilization": util}

@@ -504,7 +504,13 @@ export function GpuPanel({ onReady }: { onReady?: () => void }) {
       <span className="muted small">
         {st?.message}
         {st?.gpu ? ` · ${st.gpu.memory_used} of ${st.gpu.memory_total} used${st.busy ? " · a run is in progress" : ""}` : ""}
+        {st?.tailscale?.ip ? ` · Tailscale ${st.tailscale.ip} (${st.tailscale.link ?? "up"}) · ssh ${st.ssh_round_trip_ms ?? "?"} ms` : ""}
       </span>
+      {st?.ready && (
+        <button className="btn sm" onClick={() => api.lab.start({ recipe: "kernel_bench", args: "", executor: "ssh" }).then((r) => navigate({ kind: "lab", run: r.id })).catch((e) => toast(errorMessage(e), "error"))} title="Run kernel_bench on the box and watch the numbers">
+          Benchmark the link
+        </button>
+      )}
       <span className="grow" />
       <button className="btn sm" onClick={() => void check()} disabled={checking}>
         {checking ? "Checking…" : "Re-check"}

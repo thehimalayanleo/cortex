@@ -98,6 +98,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "gpu_status", "description": "Check the user's GPU box (the home RTX 5090 over Tailscale): reachable, GPU name and memory, whether PyTorch is ready, whether a run is in progress. Call before start_run on the ssh executor.",
         "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "gpu_benchmark", "description": "Prove the 5090 link end to end: launches the kernel_bench recipe on the GPU box over Tailscale SSH (bf16 matmul and attention throughput, KV-cache bytes) and opens the run so the user watches the numbers stream in. Read the result with read_run.",
+        "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "gpu_setup", "description": "Prepare the GPU box for runs (installs uv, a Python 3.11 venv, CUDA 12.8 PyTorch, and the training libraries over SSH; idempotent; takes minutes the first time). Returns the last log lines and the final status.",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "lab_plan", "description": "The user's learning plan: a kanban of cards (read a chapter, train the station, run the snippet, run the recipe on the GPU, pass the self-test) in columns todo|doing|done, with counts. Use it to suggest what to do next and to track progress.",
@@ -315,6 +317,10 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         from . import runs
         g = runs.gpu_status()
         return g, g.get("message", ""), "cortex://lab/runs"
+    if name == "gpu_benchmark":
+        from . import runs
+        m = runs.start("kernel_bench", "", "ssh")
+        return m, f"kernel_bench on the GPU box · {m['id']}", f"cortex://lab/run/{m['id']}"
     if name == "gpu_setup":
         from . import runs
         lines = []
@@ -374,7 +380,7 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
     raise ValueError(f"unknown tool {name}")
 
 
-WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code", "shell", "lab_plan_add", "lab_plan_remove"}
+WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code", "shell", "lab_plan_add", "lab_plan_remove", "gpu_benchmark"}
 
 
 def system_prompt(channel: str) -> str:

@@ -103,3 +103,16 @@
   --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.4), 0 24px 64px rgba(0, 0, 0, 0.55);
   --code-bg: #1e2623;
 }
+
+/* Aliases: the Lab views and the embedded lab page use these short names; they follow the palette tokens above. */
+:root {
+  --line: var(--border);
+  --panel: var(--surface);
+  --panel-2: var(--surface-2);
+  --ink: var(--text);
+  --muted: var(--text-2);
+  --faint: var(--text-3);
+  --accent-ink: var(--on-accent);
+  --mono: var(--font-mono);
+  --sans: var(--font-body);
+}

@@ -603,6 +603,7 @@ class PlanIn(BaseModel):
 class RenderIn(BaseModel):
     executor: str | None = None
     smoke: bool | None = None
+    force: bool | None = False
 
 
 @app.get("/api/studio")
@@ -648,7 +649,7 @@ def studio_remove(sid: str):
 @app.post("/api/studio/shots/{sid}/render")
 def studio_render(sid: str, r: RenderIn):
     try:
-        return studio.render(sid, r.executor, r.smoke)
+        return studio.render(sid, r.executor, r.smoke, force=bool(r.force))
     except ValueError as e:
         raise HTTPException(400, str(e))
 

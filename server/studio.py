@@ -110,8 +110,9 @@ def get_shot(sid: str) -> dict[str, Any] | None:
 
 # ---------------------------------------------------------------- takes (renders)
 
-def render(sid: str, executor: str | None = None, smoke: bool | None = None, origin: str = "ui") -> dict[str, Any]:
-    """Start a take: a cinema_render run for the shot. The 5090 renders for real; anywhere else runs the smoke brick."""
+def render(sid: str, executor: str | None = None, smoke: bool | None = None, origin: str = "ui", force: bool = False) -> dict[str, Any]:
+    """Start a take: a cinema_render run for the shot. The 5090 renders for real; anywhere else runs the smoke brick.
+    A real render needs ~24 GB of GPU memory; when someone else's job holds the box, refuse unless force=True."""
     shot = get_shot(sid)
     if not shot:
         raise ValueError(f"no shot {sid}")
@@ -119,6 +120,13 @@ def render(sid: str, executor: str | None = None, smoke: bool | None = None, ori
     executor = executor or ("ssh" if ex["ssh"]["available"] else "local")
     if smoke is None:
         smoke = executor != "ssh" or not shot.get("keyframe")
+    if executor == "ssh" and not smoke and not force:
+        g = runs.gpu_status()
+        held = int(g.get("foreign_load_mib") or 0)
+        if not g.get("ready"):
+            raise ValueError(f"the GPU box is not ready: {g.get('message')}")
+        if held > 6000:
+            raise ValueError(f"the GPU box is busy: another job holds {held} MiB and a Wan render needs about 24 GB; try when it is idle (or force the take)")
     args = [f"--shot {sid}", f"--prompt {json.dumps(shot['prompt'])}", f"--frames {shot.get('frames', 49)}", f"--size {shot.get('size', '832x480')}"]
     if smoke:
         args.append("--smoke")

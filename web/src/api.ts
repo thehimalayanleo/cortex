@@ -49,6 +49,13 @@ export interface LabRun {
 }
 export interface LabRunDetail extends LabRun { log: string[]; log_lines: number; metrics: Record<string, number>[]; rollouts: Record<string, unknown>[]; result: Record<string, unknown> | null }
 
+export interface Take { id: string; status: string; started?: string; ended?: string | null; executor?: string; origin?: string; verdict?: string | null; identity_mean?: number | null; identity_min?: number | null; flicker_mean?: number | null; gen_s?: number | null; model?: string | null; contact?: string | null; clip?: string | null; fetched?: boolean }
+export interface Shot { id: string; title: string; prompt: string; keyframe?: string | null; frames?: number; size?: string; notes?: string; status: "planned" | "rendering" | "rendered" | "approved" | "reshoot"; takes: Take[]; created?: string; director_note?: string }
+export interface StudioBoard { logline: string; shots: Shot[]; counts: Record<string, number>; assets: string[] }
+export interface TraceIn { kind?: string; content?: string; data?: unknown; tags?: string[]; source?: string; context?: string; prompt?: string; response?: string; chosen?: string; rejected?: string; rating?: number }
+export interface TraceRec extends TraceIn { id: string; ts: number; when: string; kind: string; file?: string }
+export interface TraceStats { total: number; by_kind: Record<string, number>; by_month: Record<string, number>; since: string | null; sft_pairs: number; dpo_pairs: number; root: string }
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -212,6 +219,37 @@ export const api = {
   },
 
   chatToolResult: (id: string, result: unknown) => request<{ ok: boolean }>(`/chat/tool_result/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ result }) }),
+
+  studio: {
+    board: () => request<StudioBoard>("/studio"),
+    plan: (logline: string, n = 4) => request<{ shots: Shot[]; board: StudioBoard }>("/studio/plan", { method: "POST", body: JSON.stringify({ logline, n }) }),
+    logline: (logline: string) => request<StudioBoard>("/studio/logline", { method: "POST", body: JSON.stringify({ logline }) }),
+    add: (data: { title: string; prompt: string; keyframe?: string; frames?: number; size?: string; notes?: string }) => request<Shot>("/studio/shots", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, patch: Partial<Shot> & { director_note?: string }) => request<Shot>(`/studio/shots/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(patch) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/studio/shots/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    render: (id: string, opts: { executor?: string; smoke?: boolean } = {}) => request<LabRun>(`/studio/shots/${encodeURIComponent(id)}/render`, { method: "POST", body: JSON.stringify(opts) }),
+    refresh: (id: string) => request<Shot>(`/studio/shots/${encodeURIComponent(id)}/refresh`, { method: "POST" }),
+    upload: (file: File) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      return request<{ name: string; url: string }>("/studio/assets", { method: "POST", body: fd });
+    },
+    assetUrl: (name: string) => `${BASE}/studio/assets/${encodeURIComponent(name)}`,
+  },
+
+  traces: {
+    add: (t: TraceIn) => request<TraceRec>("/traces", { method: "POST", body: JSON.stringify(t) }),
+    upload: (file: File, kind = "file", tags = "", context = "") => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      return request<TraceRec>(`/traces/file${qs({ kind, tags, context })}`, { method: "POST", body: fd });
+    },
+    list: (p: { limit?: number; kind?: string; q?: string } = {}) => request<TraceRec[]>(`/traces${qs({ limit: p.limit, kind: p.kind, q: p.q })}`),
+    stats: () => request<TraceStats>("/traces/stats"),
+    exportUrl: (fmt: string) => `${BASE}/traces/export${qs({ fmt })}`,
+  },
+
+  telemetry: () => request<{ metrics: boolean; logs: boolean; mcp: boolean; grafana_url: string | null; queued: number; metrics_sent: number; logs_sent: number; errors: number; last_error: string | null }>("/telemetry"),
 
   models: () => request<ModelInfo[]>("/models"),
 

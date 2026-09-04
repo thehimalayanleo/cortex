@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import agents, chat, runs, vault
+from . import agents, chat, runs, studio, telemetry, traces, vault
 
 app = FastAPI(title="Cortex", version="0.1")
 
@@ -564,6 +564,163 @@ def lab_run_events(rid: str):
             _t.sleep(1.0)
 
     return _sse(gen())
+
+
+# ---------------------------------------------------------------- the studio (shots, takes on the GPU, critics) and telemetry
+
+class ShotIn(BaseModel):
+    title: str
+    prompt: str
+    keyframe: str | None = None
+    frames: int | None = 49
+    size: str | None = "832x480"
+    notes: str | None = None
+
+
+class ShotPatch(BaseModel):
+    title: str | None = None
+    prompt: str | None = None
+    keyframe: str | None = None
+    frames: int | None = None
+    size: str | None = None
+    notes: str | None = None
+    status: str | None = None
+    director_note: str | None = None
+
+
+class PlanIn(BaseModel):
+    logline: str
+    n: int | None = 4
+    model: str | None = None
+
+
+class RenderIn(BaseModel):
+    executor: str | None = None
+    smoke: bool | None = None
+
+
+@app.get("/api/studio")
+def studio_board():
+    return studio.board()
+
+
+@app.post("/api/studio/logline")
+def studio_logline(p: PlanIn):
+    return studio.set_logline(p.logline)
+
+
+@app.post("/api/studio/plan")
+def studio_plan(p: PlanIn):
+    try:
+        return {"shots": studio.plan(p.logline, p.n or 4, p.model), "board": studio.board()}
+    except Exception as e:
+        raise HTTPException(502, f"planning failed: {e}")
+
+
+@app.post("/api/studio/shots")
+def studio_add(s: ShotIn):
+    return studio.add_shot(s.title, s.prompt, s.keyframe, s.frames or 49, s.size or "832x480", s.notes)
+
+
+@app.put("/api/studio/shots/{sid}")
+def studio_update(sid: str, p: ShotPatch):
+    try:
+        return studio.update_shot(sid, p.model_dump())
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.delete("/api/studio/shots/{sid}")
+def studio_remove(sid: str):
+    try:
+        studio.remove_shot(sid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/studio/shots/{sid}/render")
+def studio_render(sid: str, r: RenderIn):
+    try:
+        return studio.render(sid, r.executor, r.smoke)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/studio/shots/{sid}/refresh")
+def studio_refresh(sid: str):
+    try:
+        return studio.refresh(sid)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.get("/api/studio/takes/{rid}/{name}")
+def studio_take_file(rid: str, name: str):
+    p = studio.take_file(rid, name)
+    if not p:
+        raise HTTPException(404, "not fetched yet")
+    return FileResponse(str(p), headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/api/studio/assets")
+async def studio_asset(file: UploadFile):
+    name = studio.add_asset(file.filename or "asset.png", await file.read())
+    return {"name": name, "url": f"/api/studio/assets/{name}"}
+
+
+@app.get("/api/studio/assets/{name}")
+def studio_asset_get(name: str):
+    p = vault.VAULT / "studio" / "assets" / _safe_name(name)
+    if not p.exists():
+        raise HTTPException(404, "no such asset")
+    return FileResponse(str(p))
+
+
+@app.get("/api/telemetry")
+def telemetry_status():
+    return telemetry.status()
+
+
+# ---------------------------------------------------------------- traces: the data collector (anything, over years)
+
+class TraceIn(BaseModel):
+    kind: str | None = "note"
+    content: str | None = None
+    data: dict[str, Any] | None = None
+    tags: list[str] | None = None
+    source: str | None = None
+    context: str | None = None
+    prompt: str | None = None
+    response: str | None = None
+    chosen: str | None = None
+    rejected: str | None = None
+    rating: float | None = None
+
+
+@app.post("/api/traces")
+def trace_add(t: TraceIn):
+    return traces.add(t.model_dump())
+
+
+@app.post("/api/traces/file")
+async def trace_file(file: UploadFile, kind: str = "file", tags: str = "", context: str = ""):
+    return traces.add_file(file.filename or "upload", await file.read(), kind, [x for x in tags.split(",") if x.strip()], context)
+
+
+@app.get("/api/traces")
+def trace_list(limit: int = 100, kind: str | None = None, q: str | None = None):
+    return traces.list_traces(limit, kind, q)
+
+
+@app.get("/api/traces/stats")
+def trace_stats():
+    return traces.stats()
+
+
+@app.get("/api/traces/export")
+def trace_export(fmt: str = "sft"):
+    return traces.export(fmt)
 
 
 # ---------------------------------------------------------------- the training lab (static page + chapters)

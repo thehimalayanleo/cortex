@@ -27,7 +27,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from . import vault
+from . import telemetry, vault
 
 ROOT = Path(__file__).resolve().parent.parent
 LAB = ROOT / "lab"
@@ -105,10 +105,11 @@ def _command(executor: str, recipe: str, args: str, script: Path | None = None, 
         if not host:
             raise ValueError("CORTEX_SSH_HOST is not set; export it (for example ajinkya-5090) and restart the server")
         py = _ssh_python()
+        fwd = " ".join(f"export {k}={shlex.quote(v)};" for k, v in os.environ.items() if k.startswith("CINEMA_"))  # brick paths and pythons on the box
         remote = " && ".join([
             "mkdir -p ~/cortex-lab/out",
             "cd ~/cortex-lab",
-            f"{py} {remote_script} " + " ".join(shlex.quote(a) for a in extra),
+            f"{fwd} {py} {remote_script} " + " ".join(shlex.quote(a) for a in extra),
         ])
         return ["ssh", *SSH_OPTS, host, remote]
     if executor == "modal":
@@ -329,11 +330,14 @@ def _run(d: Path, meta: dict) -> None:
         for line in proc.stdout:
             log.write(line)
             s = line.strip()
+            if s and not s.startswith("METRIC "):
+                telemetry.push_log(meta, s)
             if s.startswith("METRIC "):
                 try:
                     obj = json.loads(s[7:])
                     obj.setdefault("t", time.time())
                     metrics.write(json.dumps(obj) + "\n")
+                    telemetry.push_metric(meta, obj)
                 except Exception:
                     pass
             elif s.startswith("ROLLOUT "):

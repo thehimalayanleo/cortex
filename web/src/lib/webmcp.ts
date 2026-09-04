@@ -360,6 +360,71 @@ export const webmcpTools: ModelContextTool[] = [
       return text(r);
     },
   },
+  // ---- the Studio (agentic cinema) and the collector
+  {
+    name: "studio_board",
+    description: "The Studio: logline, shot list with status, each shot's takes with critic scores (identity, flicker) and verdicts, and keyframe assets. Opens the board.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      navigate({ kind: "lab", studio: true });
+      const b = await api.studio.board();
+      record("studio_board", i, true, `${b.shots.length} shots`);
+      return text(b);
+    },
+  },
+  {
+    name: "plan_shots",
+    description: "Director: turn a logline into n planned shots (title, image-to-video prompt, notes) on the Studio board, in front of the user.",
+    inputSchema: { type: "object", properties: { logline: { type: "string" }, n: { type: "integer" } }, required: ["logline"] },
+    execute: async (i) => {
+      navigate({ kind: "lab", studio: true });
+      const r = await api.studio.plan(s(i.logline, 2000), n(i.n ?? 4, 1, 12));
+      changed(); record("plan_shots", i, true, `${r.shots.length} shots`);
+      return text(r.shots);
+    },
+  },
+  {
+    name: "render_shot",
+    description: "Render a take of a shot on the user's GPU box (Wan 2.2 image-to-video from its keyframe) and open the run; smoke: true runs the offline test brick. Then refresh_shot for the verdict.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, executor: { type: "string" }, smoke: { type: "boolean" } }, required: ["id"] },
+    execute: async (i) => {
+      const r = await api.studio.render(s(i.id, 80), { executor: i.executor ? s(i.executor, 10) : undefined, smoke: typeof i.smoke === "boolean" ? i.smoke : undefined });
+      changed(); navigate({ kind: "lab", run: r.id }); record("render_shot", i, true, `${s(i.id, 40)} · ${r.id}`);
+      return text(r);
+    },
+  },
+  {
+    name: "refresh_shot",
+    description: "After a take finishes: fetch its clip, contact sheet and scores into the vault and set the shot's status from the critics' verdict.",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    execute: async (i) => {
+      const sh = await api.studio.refresh(s(i.id, 80));
+      changed(); navigate({ kind: "lab", studio: true }); record("refresh_shot", i, true, `${sh.id} · ${sh.status}`);
+      return text(sh);
+    },
+  },
+  {
+    name: "collect",
+    description: "Save a trace to the user's long-term data collector for future post-training: kind note|preference|pair|rating|decision|taste|feedback|idea|link, content, tags; a preference gives chosen and rejected (and prompt); a pair gives prompt and response.",
+    inputSchema: { type: "object", properties: { kind: { type: "string" }, content: { type: "string" }, tags: { type: "array", items: { type: "string" } }, context: { type: "string" }, prompt: { type: "string" }, response: { type: "string" }, chosen: { type: "string" }, rejected: { type: "string" }, rating: { type: "number" } } },
+    execute: async (i) => {
+      const rec = await api.traces.add({ kind: s(i.kind || "note", 30), content: i.content ? s(i.content, 20000) : undefined, tags: Array.isArray(i.tags) ? (i.tags as unknown[]).map((t) => s(t, 40)) : undefined, context: i.context ? s(i.context, 500) : undefined, prompt: i.prompt ? s(i.prompt, 20000) : undefined, response: i.response ? s(i.response, 20000) : undefined, chosen: i.chosen ? s(i.chosen, 20000) : undefined, rejected: i.rejected ? s(i.rejected, 20000) : undefined, rating: typeof i.rating === "number" ? i.rating : undefined, source: "webmcp" });
+      changed(); record("collect", i, true, `${rec.kind} · ${rec.id}`);
+      return text({ id: rec.id, kind: rec.kind, when: rec.when });
+    },
+  },
+  {
+    name: "list_traces",
+    description: "Read the collector: recent traces (by kind or text query) and its stats.",
+    inputSchema: { type: "object", properties: { limit: { type: "integer" }, kind: { type: "string" }, q: { type: "string" } } },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const [rows, st] = await Promise.all([api.traces.list({ limit: n(i.limit ?? 20, 1, 200), kind: i.kind ? s(i.kind, 30) : undefined, q: i.q ? s(i.q, 200) : undefined }), api.traces.stats()]);
+      navigate({ kind: "lab", traces: true }); record("list_traces", i, true, `${rows.length} · total ${st.total}`);
+      return text({ stats: st, traces: rows });
+    },
+  },
   {
     name: "read_run",
     description: "Read a run: status, parsed metrics (thinned), final result, and the last log lines.",

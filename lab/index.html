@@ -423,6 +423,7 @@ tinystories_tokenized = tokenized(
             <div class="paint-cell"><canvas id="paintBestC" width="96" height="96"></canvas><small>best so far</small></div>
             <div class="paint-cell"><canvas id="paintMode" width="96" height="96"></canvas><small>policy mode</small></div>
           </div>
+          <p class="note" id="paintExplain">How to read this: the reference is the target. "Best so far" is the highest-scoring canvas any sample ever produced; "policy mode" is what the policy would draw if it stopped exploring. The score is out of 1.0: a perfect match with the reference scores 1.0, a blank canvas 0.0. Nothing here is stored or sent anywhere; it runs in this tab and resets when you reload. The 5090 recipe (paint_grpo) is the stored, real version.</p>
           <div class="paint-group" id="paintGroup"></div>
           <canvas class="chart" id="paintChart"></canvas>
           <div class="sample" id="paintProg">(train to see the best program)</div>
@@ -1008,6 +1009,8 @@ function paintStepOnce() {
   paintN++; paintHist.push(mean);
   const kl = paintKLnow();
   $("paintStepN").textContent = String(paintN); $("paintMean").textContent = mean.toFixed(3); $("paintBest").textContent = paintBestR.toFixed(3); $("paintBlank").textContent = (blanks / G).toFixed(2); $("paintKL").textContent = kl.toFixed(2);
+  { const bc = renderProg(paintBestProg); const r = paintReward(bc); const sim = r.r - (r.blank ? 0 : 0.05) - 0.05 * Math.min(1, r.cov / 0.25);
+    $("paintExplain").textContent = `Best canvas so far scores ${paintBestR.toFixed(2)} of 1.0: gate ${r.blank ? "0.00" : "0.05"} (not blank) + coverage ${(0.05 * Math.min(1, r.cov / 0.25)).toFixed(2)} + similarity to the reference ${sim.toFixed(2)} of 0.90. Mean reward of the current group is ${mean.toFixed(2)}; the gap between mean and best is exploration still going on. Runs in this tab only; nothing is stored or sent. The stored, real version is the paint_grpo recipe on the 5090.`; }
   const grp = $("paintGroup"); grp.innerHTML = ""; const bi = rs.indexOf(Math.max(...rs));
   cans.forEach((c, g) => { const d = document.createElement("div"); d.className = "c" + (g === bi ? " best" : ""); const cv = document.createElement("canvas"); cv.width = cv.height = PW; d.appendChild(cv); const l = document.createElement("span"); l.textContent = rs[g].toFixed(2) + (adv[g] >= 0 ? " ↑" : " ↓"); d.appendChild(l); grp.appendChild(d); drawCells(cv, c, true); });
   drawCells($("paintMode"), renderProg(paintMode()));

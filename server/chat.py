@@ -48,7 +48,8 @@ def session_headers(key: str | None = None) -> dict[str, str]:
 def client() -> OpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(base_url=BASE_URL, api_key=_load_key() or "missing", default_headers={"User-Agent": UA, **session_headers()})
+        # A hung provider must fail visibly: 90 s to first byte / between chunks, one retry, then an error event in the chat.
+        _client = OpenAI(base_url=BASE_URL, api_key=_load_key() or "missing", default_headers={"User-Agent": UA, **session_headers()}, timeout=90.0, max_retries=1)
     return _client
 
 

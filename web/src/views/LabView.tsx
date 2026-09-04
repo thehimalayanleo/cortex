@@ -143,17 +143,9 @@ function Stations({ station }: { station?: string }) {
   }, []);
   return (
     <div className="lab-stations">
-      <nav className="lab-stnav" aria-label="Stations">
-        {LAB_STATIONS.map((s) => (
-          <button key={s} className={`lnk ${s === st ? "on" : ""}`} onClick={() => navigate({ kind: "lab", station: s })}>
-            {s === "overview" ? "Map" : s === "posttrain" ? "post-train" : s === "midtrain" ? "mid-train" : s}
-          </button>
-        ))}
-        <span className="grow" />
-        <a className="lnk" href="/lab/" target="_blank" rel="noreferrer">
-          Open full page ↗
-        </a>
-      </nav>
+      <a className="lab-fullpage" href={`/lab/#${st}`} target="_blank" rel="noreferrer" title="Open the lab in its own tab">
+        Open full page ↗
+      </a>
       <iframe id="lab-frame" ref={ref} title="Training Lab" src={src} className="lab-frame" />
     </div>
   );

@@ -640,3 +640,8 @@
 .unit{flex:0 0 auto}
 .unit summary{min-height:44px}
 .unit ul{max-height:none}
+
+/* stations: the embedded page carries its own navigation and search; no second strip on top */
+.lab-stations{position:relative}
+.lab-fullpage{position:absolute;top:8px;right:16px;z-index:2;font:500 12px var(--sans);color:var(--muted);text-decoration:none;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.lab-fullpage:hover{color:var(--ink);border-color:var(--accent)}

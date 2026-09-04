@@ -492,6 +492,8 @@ def stream(channel: str, content: str, model: str | None = None, context: dict |
     except Exception as e:
         yield {"type": "error", "code": type(e).__name__, "message": str(e)[:300]}
     msg = {"id": uuid.uuid4().hex, "role": "assistant", "content": text_all.strip(), "ts": int(time.time() * 1000), "trace": trace, "model": model}
-    if msg["content"] or trace:
+    # If the person started a new chat while this reply was in flight, the old log was archived; do not resurrect it.
+    archived_meanwhile = not vault.chat_path(channel).exists()
+    if (msg["content"] or trace) and not archived_meanwhile:
         vault.append_chat(channel, msg)
-    yield {"type": "done", "message": msg}
+    yield {"type": "done", "message": msg, "archived": archived_meanwhile}

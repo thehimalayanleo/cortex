@@ -254,12 +254,17 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
   useEffect(() => onCommand("new-chat", () => void clearChannel()));
   // "New chat": the old thread is archived on disk (chats/archive), so no confirm is needed.
   const clearChannel = async () => {
-    if (streaming) stop();
+    const had = items.length > 0;
+    if (streaming) {
+      stop();
+      await new Promise((r) => setTimeout(r, 400)); // let the aborted stream settle before the log is archived
+    }
     try {
       await api.chat.clear(channel);
       setItems([]);
       setDraft("");
-      if (items.length) toast("Previous chat archived");
+      loadMessages(channel); // re-read from disk so the panel shows exactly what the server has (an empty thread)
+      if (had) toast("Previous chat archived");
       composerRef.current?.focus();
     } catch (e) {
       toast(`New chat failed: ${errorMessage(e)}`, "error");

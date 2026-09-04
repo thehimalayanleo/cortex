@@ -535,6 +535,7 @@ function Plan({ refresh }: { refresh: number }) {
   const [err, setErr] = useState<string | null>(null);
   const [filter, setFilter] = useState<number | "all">("all");
   const [newTitle, setNewTitle] = useState("");
+  const [query, setQuery] = useState("");
   const load = useCallback(async () => {
     try {
       setPlan(await api.lab.plan());
@@ -562,13 +563,34 @@ function Plan({ refresh }: { refresh: number }) {
   if (err) return <EmptyState title="Could not load the plan" hint={err} />;
   if (!plan) return <EmptyState title="Loading plan" />;
   const chaptersIn = Array.from(new Set(plan.cards.map((c) => c.chapter))).sort((a, b) => a - b);
-  const cards = plan.cards.filter((c) => filter === "all" || c.chapter === filter || (c.custom && filter === 0));
+  const q = query.trim().toLowerCase();
+  const cards = plan.cards.filter((c) => (filter === "all" || c.chapter === filter || (c.custom && filter === 0)) && (!q || `${String(c.chapter).padStart(2, "0")} ${c.title} ${c.kind} ${c.comment ?? ""}`.toLowerCase().includes(q)));
   const cols: { id: PlanCol; title: string }[] = [
     { id: "todo", title: "To learn" },
     { id: "doing", title: "In progress" },
     { id: "done", title: "Done" },
   ];
   const pct = plan.total ? Math.round((100 * plan.done) / plan.total) : 0;
+  // Units: the To learn column grouped by chapter, in order, like a course path. The current unit is the first
+  // one with something left to do; it opens by default and the others collapse.
+  const unitTitle = (n: number) => {
+    const read = plan.cards.find((c) => c.chapter === n && c.kind === "read");
+    return read ? read.title.replace(/^Read:\s*/, "") : `Chapter ${n}`;
+  };
+  const units = (() => {
+    const byKey = new Map<string, { key: string; chapter: number; title: string; cards: PlanCard[]; done: number; total: number }>();
+    for (const c of cards) {
+      const key = c.custom ? "custom" : String(c.chapter);
+      if (!byKey.has(key)) byKey.set(key, { key, chapter: c.custom ? 999 : c.chapter, title: c.custom ? "Your own cards" : unitTitle(c.chapter), cards: [], done: 0, total: 0 });
+      const u = byKey.get(key)!;
+      u.total += 1;
+      if (c.col === "done") u.done += 1;
+      if (c.col === "todo") u.cards.push(c);
+    }
+    return Array.from(byKey.values()).filter((u) => u.cards.length > 0).sort((a, b) => a.chapter - b.chapter);
+  })();
+  const currentUnit = units.find((u) => u.cards.length > 0)?.key;
+  const nextUp = units.find((u) => u.key === currentUnit)?.cards[0];
   const add = async () => {
     const t = newTitle.trim();
     if (!t) return;
@@ -604,22 +626,19 @@ function Plan({ refresh }: { refresh: number }) {
           <b>{plan.streak} day{plan.streak === 1 ? "" : "s"}</b>
           <span className="muted small">streak{plan.done_today ? ` · ${plan.done_today} today` : ""}</span>
         </div>
-        <span className="grow" />
-        <form
-          className="lab-plan-add"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void add();
-          }}
-        >
-          <input className="input sm" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Add something to learn…" aria-label="New card" />
-          <button className="btn sm" type="submit" disabled={!newTitle.trim()}>
-            Add
-          </button>
-        </form>
+      </div>
+      <div className="lab-plan-tools">
+        <input
+          className="input plan-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search your plan (title, chapter number, kind)…"
+          aria-label="Search cards"
+          spellCheck={false}
+        />
         <label className="muted small">
           Chapter{" "}
-          <select className="select sm" value={String(filter)} onChange={(e) => setFilter(e.target.value === "all" ? "all" : Number(e.target.value))}>
+          <select className="select" value={String(filter)} onChange={(e) => setFilter(e.target.value === "all" ? "all" : Number(e.target.value))}>
             <option value="all">all</option>
             {chaptersIn.map((n) => (
               <option key={n} value={n}>
@@ -628,13 +647,77 @@ function Plan({ refresh }: { refresh: number }) {
             ))}
           </select>
         </label>
+        <form
+          className="lab-plan-add"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void add();
+          }}
+        >
+          <input className="input" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Add something to learn…" aria-label="New card" />
+          <button className="btn primary" type="submit" disabled={!newTitle.trim()}>
+            Add
+          </button>
+        </form>
       </div>
+      {nextUp && (
+        <div className="next-up">
+          <span className="next-label">Next up</span>
+          <span className="next-chap">{nextUp.custom ? "you" : `Unit ${String(nextUp.chapter).padStart(2, "0")}`}</span>
+          <span className="next-title">{nextUp.title}</span>
+          <span className="grow" />
+          <button className="btn sm" onClick={() => open(nextUp)}>
+            Open
+          </button>
+          <button className="primary sm" onClick={() => void move(nextUp, "doing")}>
+            Start
+          </button>
+        </div>
+      )}
       <div className="kanban">
         {cols.map((col) => (
           <section key={col.id} className="kanban-col" aria-label={col.title}>
             <h3>
               {col.title} <span className="muted">{cards.filter((c) => c.col === col.id).length}</span>
             </h3>
+            {col.id === "todo" ? (
+              <div className="units">
+                {units.map((u) => (
+                  <details key={u.key} className={`unit ${u.key === currentUnit ? "current" : ""}`} open={u.key === currentUnit}>
+                    <summary>
+                      <span className="unit-num">{u.key === "custom" ? "you" : String(u.chapter).padStart(2, "0")}</span>
+                      <span className="unit-title">{u.title}</span>
+                      <span className="unit-count">
+                        {u.done}/{u.total}
+                      </span>
+                      <span className="unit-bar">
+                        <i style={{ width: `${u.total ? (100 * u.done) / u.total : 0}%` }} />
+                      </span>
+                    </summary>
+                    <ul>
+                      {u.cards.map((c) => (
+                        <li key={c.id} className={`kcard k-${c.kind}`}>
+                          <button className="kcard-main" onClick={() => open(c)} title="Open">
+                            <span className="ktitle">{c.title}</span>
+                            {c.comment && <span className="kcomment">{c.comment}</span>}
+                          </button>
+                          <span className="kmoves">
+                            {c.custom && (
+                              <button className="icon-btn" onClick={() => void remove(c)} title="Delete this card" aria-label="Delete this card">
+                                ×
+                              </button>
+                            )}
+                            <button className="icon-btn" onClick={() => void move(c, "doing")} title="Start" aria-label="Start">
+                              →
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </div>
+            ) : (
             <ul>
               {cards
                 .filter((c) => c.col === col.id)
@@ -665,6 +748,7 @@ function Plan({ refresh }: { refresh: number }) {
                   </li>
                 ))}
             </ul>
+            )}
           </section>
         ))}
       </div>

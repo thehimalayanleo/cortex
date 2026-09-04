@@ -152,6 +152,21 @@
 
 .md .codeblock{position:relative;margin:10px 0}
 .md .codeblock pre{margin:0;border-top-left-radius:0;border-top-right-radius:0}
-.md .codebar{display:flex;align-items:center;justify-content:space-between;background:var(--surface-2);border:1px solid var(--border);border-bottom:0;border-radius:8px 8px 0 0;padding:3px 8px 3px 10px;font:11px var(--mono);color:var(--text-3)}
+.md .codebar{display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--border);border-bottom:0;border-radius:8px 8px 0 0;padding:4px 8px 4px 12px;font:11px var(--font-mono);color:var(--text-3)}
+.md .codebar .lang{color:var(--accent-text);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.md .codebar .grow{flex:1}
+.md .codebar .copy-code{font:500 11.5px var(--font-body);color:var(--text-2);background:transparent;border:1px solid var(--border);border-radius:6px;padding:2px 8px;cursor:pointer}
+.md .codebar .copy-code:hover{color:var(--text);border-color:var(--border-strong)}
 .md .codebar .run-code{font:500 11.5px var(--sans);color:var(--on-accent);background:var(--accent);border:0;border-radius:6px;padding:3px 9px;cursor:pointer}
 .md .codebar .run-code:hover{filter:brightness(1.08)}
+
+/* code highlighting: highlight.js classes mapped onto the palette tokens, so every theme colours code consistently */
+.md pre code.hljs{display:block;overflow-x:auto;color:var(--text)}
+.hljs-comment,.hljs-quote{color:var(--text-3);font-style:italic}
+.hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-built_in,.hljs-type{color:var(--accent-text);font-weight:500}
+.hljs-string,.hljs-regexp,.hljs-addition{color:color-mix(in srgb,var(--accent) 55%,var(--text))}
+.hljs-number,.hljs-symbol,.hljs-attr,.hljs-variable,.hljs-template-variable{color:color-mix(in srgb,var(--text) 80%,var(--accent))}
+.hljs-title,.hljs-title.function_,.hljs-title.class_,.hljs-section,.hljs-name{color:var(--text);font-weight:600}
+.hljs-meta,.hljs-params{color:var(--text-2)}
+.hljs-deletion{color:#d0453f}
+.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:700}

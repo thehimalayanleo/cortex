@@ -13,6 +13,7 @@ specifiers:
   '@types/react': ^18.3.5
   '@types/react-dom': ^18.3.0
   '@vitejs/plugin-react': ^4.3.1
+  highlight.js: '11'
   katex: ^0.16.11
   markdown-it: ^14.1.0
   react: ^18.3.1
@@ -28,6 +29,7 @@ dependencies:
   '@codemirror/state': 6.7.2
   '@codemirror/view': 6.43.10
   '@lezer/highlight': 1.2.3
+  highlight.js: 11.12.0
   katex: 0.16.47
   markdown-it: 14.3.1
   react: 18.3.1
@@ -1304,6 +1306,11 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
     dev: true
+
+  /highlight.js/11.12.0:
+    resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
+    engines: {node: '>=12.0.0'}
+    dev: false
 
   /js-tokens/4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}

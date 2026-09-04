@@ -17,6 +17,7 @@
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.33.0",
     "@lezer/highlight": "^1.2.0",
+    "highlight.js": "11",
     "katex": "^0.16.11",
     "markdown-it": "^14.1.0",
     "react": "^18.3.1",

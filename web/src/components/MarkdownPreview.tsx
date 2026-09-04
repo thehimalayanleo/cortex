@@ -18,8 +18,20 @@ export function handleCortexClick(e: MouseEvent<HTMLElement>): boolean {
   const runBtn = target?.closest?.("button.run-code");
   if (runBtn) {
     e.preventDefault();
-    const code = runBtn.closest(".codeblock")?.querySelector("pre code")?.textContent ?? "";
-    window.dispatchEvent(new CustomEvent("cortex:run-code", { detail: { code } }));
+    const block = runBtn.closest(".codeblock");
+    const code = block?.querySelector("pre code")?.textContent ?? "";
+    const lang = block?.getAttribute("data-lang") ?? "python";
+    window.dispatchEvent(new CustomEvent("cortex:run-code", { detail: { code, lang } }));
+    return true;
+  }
+  const copyBtn = target?.closest?.("button.copy-code");
+  if (copyBtn) {
+    e.preventDefault();
+    const code = copyBtn.closest(".codeblock")?.querySelector("pre code")?.textContent ?? "";
+    void navigator.clipboard?.writeText(code).then(() => {
+      copyBtn.textContent = "Copied";
+      window.setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+    });
     return true;
   }
   const a = target?.closest?.("a");

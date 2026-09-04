@@ -719,6 +719,17 @@ function runner(nSteps, stepFn, onDone) {
 const $ = (id) => document.getElementById(id);
 // surface uncaught errors in the page (the lab runs on the GPU through WebGL; shape errors otherwise die silently in rAF)
 window.__labErrors = [];
+// Theme: when Cortex embeds this page it sends its live palette tokens; the standalone page reuses the last one it saw.
+const LAB_THEME_MAP = { "--bg": "--bg", "--surface": "--panel", "--surface-2": "--panel-2", "--border": "--line", "--text": "--ink", "--text-2": "--muted", "--text-3": "--faint", "--accent": "--accent", "--accent-soft": "--accent-soft", "--on-accent": "--accent-ink", "--accent-text": "--c1" };
+function applyLabTheme(t) {
+  if (!t || typeof t !== "object") return;
+  const r = document.documentElement.style;
+  for (const [from, to] of Object.entries(LAB_THEME_MAP)) if (t.vars && t.vars[from]) r.setProperty(to, t.vars[from]);
+  if (t.theme === "dark" || t.theme === "light") document.documentElement.dataset.theme = t.theme; else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("cortex.lab.theme", JSON.stringify(t)); } catch {}
+}
+try { const saved = localStorage.getItem("cortex.lab.theme"); if (saved) applyLabTheme(JSON.parse(saved)); } catch {}
+window.addEventListener("message", (e) => { if (e.data && e.data.type === "lab:theme") applyLabTheme(e.data); });
 window.addEventListener("error", (e) => { window.__labErrors.push(String(e.message)); let el = document.getElementById("labErr"); if (!el) { el = document.createElement("div"); el.id = "labErr"; el.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:99;max-width:60ch;padding:8px 12px;border-radius:8px;background:#5a1d1d;color:#fff;font:12px/1.4 monospace"; document.body.appendChild(el); } el.textContent = "error: " + e.message; });
 const fmt = (v) => (v == null || Number.isNaN(v) ? "–" : v.toFixed(3));
 

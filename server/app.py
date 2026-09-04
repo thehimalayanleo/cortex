@@ -414,6 +414,7 @@ class RunIn(BaseModel):
     args: str | None = ""
     executor: str | None = "local"
     code: str | None = None  # run this Python source instead of a named recipe
+    cmd: str | None = None  # or run this shell command (the terminal)
 
 
 @app.get("/api/lab/executors")
@@ -436,6 +437,31 @@ class PlanMove(BaseModel):
     id: str
     col: str
     comment: str | None = None
+
+
+class PlanCardIn(BaseModel):
+    title: str
+    kind: str | None = "custom"
+    note: str | None = None
+    station: str | None = None
+    recipe: str | None = None
+    chapter: int | None = None
+
+
+@app.post("/api/lab/plan/cards")
+def lab_plan_add(c: PlanCardIn):
+    try:
+        return runs.plan_add(c.title, c.kind or "custom", c.note, c.station, c.recipe, c.chapter)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/lab/plan/cards/{cid}")
+def lab_plan_remove(cid: str):
+    try:
+        return runs.plan_remove(cid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/lab/plan")
@@ -469,7 +495,7 @@ def lab_runs(limit: int = 50):
 @app.post("/api/lab/runs")
 def lab_run_start(r: RunIn):
     try:
-        return runs.start(r.recipe, r.args or "", r.executor or "local", r.code)
+        return runs.start(r.recipe, r.args or "", r.executor or "local", r.code, r.cmd)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

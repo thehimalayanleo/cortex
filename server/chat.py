@@ -101,6 +101,10 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "lab_plan", "description": "The user's learning plan: a kanban of cards (read a chapter, train the station, run the snippet, run the recipe on the GPU, pass the self-test) in columns todo|doing|done, with counts. Use it to suggest what to do next and to track progress.",
         "parameters": {"type": "object", "properties": {"col": {"type": "string", "enum": ["todo", "doing", "done", "all"]}}}}},
+    {"type": "function", "function": {"name": "lab_plan_add", "description": "Add a learning card to the user's plan on the fly: a topic to study, a paper to work through, a snippet to build, a run to do, or a quiz. kind: custom|read|build|recipe|quiz|station. Pair with write_note (topics [lab]) when the user wants a new lesson written, then link it with note=<slug>. Use when the user says they want to learn something new.",
+        "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "kind": {"type": "string"}, "note": {"type": "string"}, "station": {"type": "string"}, "recipe": {"type": "string"}, "chapter": {"type": "integer"}}, "required": ["title"]}}},
+    {"type": "function", "function": {"name": "lab_plan_remove", "description": "Delete a custom learning card (ids start with custom-). Built-in chapter cards cannot be deleted; move them to done instead.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "lab_plan_move", "description": "Move a learning card to a column (todo|doing|done) with an optional comment, for example after the user passes a quiz or finishes a run.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "col": {"type": "string"}, "comment": {"type": "string"}}, "required": ["id", "col"]}}},
     {"type": "function", "function": {"name": "list_runs", "description": "List training runs launched from the lab (recipe, executor, status, last metric).",
@@ -109,6 +113,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"recipe": {"type": "string"}, "args": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh", "modal"]}}, "required": ["recipe"]}}},
     {"type": "function", "function": {"name": "run_code", "description": "Run a Python script the user wrote or a chapter's 'Build it small' snippet on an executor (local|ssh|modal). Save nothing else; print METRIC {\"step\":..} lines from the code to get charts. Returns the run id; read it with read_run. Only when the user asks to run code.",
         "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh", "modal"]}, "args": {"type": "string"}}, "required": ["code"]}}},
+    {"type": "function", "function": {"name": "shell", "description": "Run one shell command in the Lab terminal on the user's GPU box (executor ssh, default; cwd ~/cortex-lab, the lab venv on PATH) or this machine (local), and open it so the user sees the output stream. Examples: nvidia-smi, ls out, python recipes/pretrain_nano.py --smoke. Only when the user asks to run a command; never destructive commands without an explicit request.",
+        "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh"]}}, "required": ["cmd"]}}},
     {"type": "function", "function": {"name": "read_run", "description": "Read a run: status, the parsed metrics (loss curves etc.), the final result, and the last log lines.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "tail": {"type": "integer"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
@@ -324,6 +330,14 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         col = a.get("col") or "all"
         cards = [c for c in pl["cards"] if col == "all" or c["col"] == col]
         return {"done": pl["done"], "total": pl["total"], "cards": cards}, f"plan · {pl['done']}/{pl['total']} done", "cortex://lab/plan"
+    if name == "lab_plan_add":
+        from . import runs
+        pl = runs.plan_add(str(a["title"]), str(a.get("kind") or "custom"), a.get("note"), a.get("station"), a.get("recipe"), a.get("chapter"))
+        return {"added": pl["added"], "done": pl["done"], "total": pl["total"]}, f"+ {str(a['title'])[:60]}", "cortex://lab/plan"
+    if name == "lab_plan_remove":
+        from . import runs
+        pl = runs.plan_remove(str(a["id"]))
+        return {"done": pl["done"], "total": pl["total"]}, f"removed {a['id']}", "cortex://lab/plan"
     if name == "lab_plan_move":
         from . import runs
         pl = runs.plan_move(str(a["id"]), str(a["col"]), a.get("comment"))
@@ -337,6 +351,10 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         from . import runs
         m = runs.start(str(a["recipe"]), str(a.get("args") or ""), str(a.get("executor") or "local"))
         return m, f"{m['recipe']} on {m['executor']} · {m['id']}", f"cortex://lab/run/{m['id']}"
+    if name == "shell":
+        from . import runs
+        m = runs.start("shell", "", str(a.get("executor") or "ssh"), cmd=str(a["cmd"]))
+        return m, f"$ {str(a['cmd'])[:60]} · {m['executor']}", f"cortex://lab/run/{m['id']}"
     if name == "run_code":
         from . import runs
         m = runs.start("scratch", str(a.get("args") or ""), str(a.get("executor") or "ssh"), code=str(a["code"]))
@@ -355,7 +373,7 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
     raise ValueError(f"unknown tool {name}")
 
 
-WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code"}
+WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code", "shell", "lab_plan_add", "lab_plan_remove"}
 
 
 def system_prompt(channel: str) -> str:
@@ -394,7 +412,7 @@ def _context_line(ctx: dict | None) -> str:
         where = f"station '{cid}'" if cid else "the overview"
         return (f"\nOPEN IN THE APP RIGHT NOW: the Training Lab, {where}. The lab has in-browser stations (data, pretrain, midtrain, posttrain, encoder, cluster, paint) "
                 "that train a tiny transformer with tf.js, 15 teaching chapters (list_lab_chapters, then read_note on a slug like lab-05-preference-and-rl), "
-                "and GPU runs (list_runs, start_run, read_run). Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
+                "GPU runs (list_runs, start_run, read_run, run_code, shell), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
                 "Link: cortex://lab")
     return ""
 

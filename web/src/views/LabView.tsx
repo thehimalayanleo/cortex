@@ -11,6 +11,28 @@ import { useAsync } from "../lib/hooks";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
 
+/** Arguments that make a first click succeed on any machine; edit them for the real thing. */
+const DEFAULT_ARGS: Record<string, string> = {
+  pretrain_nano: "--smoke --steps 300",
+  midtrain: "--smoke --steps 200",
+  sft_lora: "--smoke --steps 200",
+  dpo: "--smoke --steps 150",
+  grpo_tool: "--smoke --steps 60",
+  paint_grpo: "--smoke --steps 80",
+  embed_contrastive: "--smoke --steps 200",
+  embed_vault: "--smoke",
+  eval_suite: "--smoke",
+  redteam_suite: "--smoke",
+  kernel_bench: "--smoke",
+  optim_bench: "--smoke --steps 100",
+  lean_eval: "--smoke",
+  spec_decode: "--smoke --steps 60",
+  moe_nano: "--smoke --steps 150",
+  inspect_model: "--smoke",
+  scratch: "",
+  shell: "",
+};
+
 export const LAB_STATIONS = ["overview", "data", "pretrain", "midtrain", "posttrain", "encoder", "cluster", "paint", "speculative", "moe"] as const;
 
 /** Ask the embedded lab page to do something; resolves with its reply. Used by the WebMCP tools too. */
@@ -35,20 +57,21 @@ export function labMessage(msg: Record<string, unknown>, timeoutMs = 4000): Prom
   });
 }
 
-export function LabView({ station, runId, plan, refresh }: { station?: string; runId?: string; plan?: boolean; refresh: number }) {
-  const [tab, setTab] = useState<"stations" | "chapters" | "runs" | "plan">(plan ? "plan" : runId != null ? "runs" : "stations");
+export function LabView({ station, runId, plan, terminal, refresh }: { station?: string; runId?: string; plan?: boolean; terminal?: boolean; refresh: number }) {
+  const [tab, setTab] = useState<"stations" | "chapters" | "runs" | "plan" | "terminal">(terminal ? "terminal" : plan ? "plan" : runId != null ? "runs" : "stations");
   useEffect(() => {
-    if (plan) setTab("plan");
+    if (terminal) setTab("terminal");
+    else if (plan) setTab("plan");
     else if (runId != null) setTab("runs");
     else if (station) setTab("stations");
-  }, [runId, plan, station]);
+  }, [runId, plan, station, terminal]);
   const chapters = useAsync(() => api.lab.chapters(), [], [refresh]);
 
   return (
     <section className="lab-view">
       <header className="lab-head">
         <div className="lab-tabs" role="tablist">
-          {(["plan", "stations", "chapters", "runs"] as const).map((t) => (
+          {(["plan", "stations", "chapters", "runs", "terminal"] as const).map((t) => (
             <button
               key={t}
               role="tab"
@@ -56,10 +79,10 @@ export function LabView({ station, runId, plan, refresh }: { station?: string; r
               aria-selected={tab === t}
               onClick={() => {
                 setTab(t);
-                navigate(t === "plan" ? { kind: "lab", plan: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
+                navigate(t === "plan" ? { kind: "lab", plan: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
               }}
             >
-              {t === "plan" ? "My plan" : t === "stations" ? "In the browser" : t === "chapters" ? `Chapters${chapters.data ? ` · ${chapters.data.length}` : ""}` : "GPU runs"}
+              {t === "plan" ? "My plan" : t === "stations" ? "In the browser" : t === "chapters" ? `Chapters${chapters.data ? ` · ${chapters.data.length}` : ""}` : t === "terminal" ? "Terminal" : "GPU runs"}
             </button>
           ))}
         </div>
@@ -77,6 +100,7 @@ export function LabView({ station, runId, plan, refresh }: { station?: string; r
       {tab === "chapters" && <Chapters chapters={chapters.data} loading={chapters.loading} error={chapters.error} />}
       {tab === "runs" && <Runs runId={runId || undefined} refresh={refresh} />}
       {tab === "plan" && <Plan refresh={refresh} />}
+      {tab === "terminal" && <Terminal />}
     </section>
   );
 }
@@ -90,6 +114,33 @@ function Stations({ station }: { station?: string }) {
     const w = ref.current?.contentWindow;
     if (w) w.postMessage({ type: "lab:show", station: st }, "*");
   }, [st]);
+  // Keep the embedded page on the same palette as Cortex: send the live tokens on load and whenever the theme changes.
+  useEffect(() => {
+    const send = () => {
+      const w = ref.current?.contentWindow;
+      if (!w) return;
+      const cs = getComputedStyle(document.documentElement);
+      const vars: Record<string, string> = {};
+      for (const v of ["--bg", "--surface", "--surface-2", "--border", "--text", "--text-2", "--text-3", "--accent", "--accent-soft", "--on-accent", "--accent-text"]) {
+        const val = cs.getPropertyValue(v).trim();
+        if (val) vars[v] = val;
+      }
+      const theme = document.documentElement.dataset.theme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      w.postMessage({ type: "lab:theme", vars, theme }, "*");
+    };
+    const frame = ref.current;
+    frame?.addEventListener("load", send);
+    const mo = new MutationObserver(send);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-theme", "data-palette"] });
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", send);
+    send();
+    return () => {
+      frame?.removeEventListener("load", send);
+      mo.disconnect();
+      mq.removeEventListener("change", send);
+    };
+  }, []);
   return (
     <div className="lab-stations">
       <nav className="lab-stnav" aria-label="Stations">
@@ -136,8 +187,12 @@ function Runs({ runId, refresh }: { runId?: string; refresh: number }) {
   const ex = useAsync(() => api.lab.executors(), [], []);
   const recipes = useAsync(() => api.lab.recipes(), [], []);
   const runs = useAsync(() => api.lab.runs(), [], [refresh]);
-  const [recipe, setRecipe] = useState("pretrain_nano");
+  const [recipe, setRecipeState] = useState("pretrain_nano");
   const [args, setArgs] = useState("--smoke --steps 200");
+  const setRecipe = (r: string) => {
+    setRecipeState(r);
+    setArgs(DEFAULT_ARGS[r] ?? "--smoke --steps 200");
+  };
   const [executor, setExecutor] = useState<"local" | "ssh" | "modal">("local");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | null>(runId ?? null);
@@ -479,6 +534,7 @@ function Plan({ refresh }: { refresh: number }) {
   const [plan, setPlan] = useState<LabPlan | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [filter, setFilter] = useState<number | "all">("all");
+  const [newTitle, setNewTitle] = useState("");
   const load = useCallback(async () => {
     try {
       setPlan(await api.lab.plan());
@@ -506,13 +562,31 @@ function Plan({ refresh }: { refresh: number }) {
   if (err) return <EmptyState title="Could not load the plan" hint={err} />;
   if (!plan) return <EmptyState title="Loading plan" />;
   const chaptersIn = Array.from(new Set(plan.cards.map((c) => c.chapter))).sort((a, b) => a - b);
-  const cards = plan.cards.filter((c) => filter === "all" || c.chapter === filter);
+  const cards = plan.cards.filter((c) => filter === "all" || c.chapter === filter || (c.custom && filter === 0));
   const cols: { id: PlanCol; title: string }[] = [
     { id: "todo", title: "To learn" },
     { id: "doing", title: "In progress" },
     { id: "done", title: "Done" },
   ];
   const pct = plan.total ? Math.round((100 * plan.done) / plan.total) : 0;
+  const add = async () => {
+    const t = newTitle.trim();
+    if (!t) return;
+    try {
+      setPlan(await api.lab.planAdd({ title: t, kind: "custom" }));
+      setNewTitle("");
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  };
+  const remove = async (c: PlanCard) => {
+    if (!window.confirm(`Delete "${c.title}"?`)) return;
+    try {
+      setPlan(await api.lab.planRemove(c.id));
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    }
+  };
   return (
     <div className="lab-plan">
       <div className="lab-plan-head">
@@ -530,6 +604,18 @@ function Plan({ refresh }: { refresh: number }) {
           {plan.done_today ? ` · ${plan.done_today} today` : ""}
         </span>
         <span className="grow" />
+        <form
+          className="lab-plan-add"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void add();
+          }}
+        >
+          <input className="input sm" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Add something to learn…" aria-label="New card" />
+          <button className="btn sm" type="submit" disabled={!newTitle.trim()}>
+            Add
+          </button>
+        </form>
         <label className="muted small">
           Chapter{" "}
           <select className="select sm" value={String(filter)} onChange={(e) => setFilter(e.target.value === "all" ? "all" : Number(e.target.value))}>
@@ -554,11 +640,16 @@ function Plan({ refresh }: { refresh: number }) {
                 .map((c) => (
                   <li key={c.id} className={`kcard k-${c.kind}`}>
                     <button className="kcard-main" onClick={() => open(c)} title="Open">
-                      <span className="kchap">{String(c.chapter).padStart(2, "0")}</span>
+                      <span className="kchap">{c.custom ? "you" : String(c.chapter).padStart(2, "0")}</span>
                       <span className="ktitle">{c.title}</span>
                       {c.comment && <span className="kcomment">{c.comment}</span>}
                     </button>
                     <span className="kmoves">
+                      {c.custom && (
+                        <button className="icon-btn" onClick={() => void remove(c)} title="Delete this card" aria-label="Delete this card">
+                          ×
+                        </button>
+                      )}
                       {col.id !== "todo" && (
                         <button className="icon-btn" onClick={() => void move(c, col.id === "done" ? "doing" : "todo")} title="Move back" aria-label="Move back">
                           ←
@@ -640,5 +731,120 @@ function ScriptView({ id, preview }: { id: string; preview?: string }) {
       <summary>Script · {preview}</summary>
       <pre>{code ?? "…"}</pre>
     </details>
+  );
+}
+
+
+/** A terminal: one command at a time on this machine or the GPU box, output streamed. Not a PTY (no vim), but
+ *  everything a training loop needs: nvidia-smi, ls out, python recipes/x.py, tail -f. Commands are runs, so they are kept. */
+function Terminal() {
+  const { toast } = useToast();
+  const ex = useAsync(() => api.lab.executors(), [], []);
+  const [executor, setExecutor] = useState<"local" | "ssh">("ssh");
+  useEffect(() => {
+    if (ex.data && !ex.data.ssh.available) setExecutor("local");
+  }, [ex.data]);
+  const [cmd, setCmd] = useState("nvidia-smi");
+  const [history, setHistory] = useState<{ id: string; cmd: string; executor: string; lines: string[]; status: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const outRef = useRef<HTMLDivElement>(null);
+  const prevCmds = useRef<string[]>([]);
+  const histIdx = useRef(-1);
+
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      setCmd(String((e as CustomEvent).detail?.cmd ?? ""));
+      inputRef.current?.focus();
+    };
+    window.addEventListener("cortex:terminal-prefill", onPrefill);
+    return () => window.removeEventListener("cortex:terminal-prefill", onPrefill);
+  }, []);
+  useEffect(() => {
+    // older shell runs come back as history
+    api.lab.runs(30).then((rs) => {
+      const shells = rs.filter((r) => r.recipe === "shell").reverse();
+      prevCmds.current = shells.map((r) => r.cmd ?? "").filter(Boolean);
+    }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const el = outRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [history]);
+
+  const run = async (command?: string) => {
+    const c = (command ?? cmd).trim();
+    if (!c || busy) return;
+    setBusy(true);
+    setCmd("");
+    prevCmds.current.push(c);
+    histIdx.current = -1;
+    try {
+      const r = await api.lab.start({ recipe: "shell", cmd: c, executor });
+      setHistory((h) => [...h, { id: r.id, cmd: c, executor, lines: [], status: "running" }]);
+      const es = new EventSource(api.lab.eventsUrl(r.id));
+      await new Promise<void>((resolve) => {
+        es.onmessage = (ev) => {
+          try {
+            const d = JSON.parse(ev.data) as { type: string; lines?: string[]; status?: string };
+            if (d.type === "log" && d.lines) setHistory((h) => h.map((x) => (x.id === r.id ? { ...x, lines: [...x.lines, ...d.lines!.filter((l) => !l.startsWith("[cortex] $"))].slice(-2000) } : x)));
+            if (d.type === "status" || d.type === "error") {
+              setHistory((h) => h.map((x) => (x.id === r.id ? { ...x, status: d.status ?? "failed" } : x)));
+              es.close();
+              resolve();
+            }
+          } catch {
+            /* ignore */
+          }
+        };
+        es.onerror = () => { es.close(); resolve(); };
+      });
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setBusy(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") { e.preventDefault(); void run(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); const n = prevCmds.current.length; if (!n) return; histIdx.current = histIdx.current === -1 ? n - 1 : Math.max(0, histIdx.current - 1); setCmd(prevCmds.current[histIdx.current]); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); const n = prevCmds.current.length; if (histIdx.current === -1) return; histIdx.current = Math.min(n - 1, histIdx.current + 1); setCmd(prevCmds.current[histIdx.current]); }
+  };
+  const host = ex.data?.ssh.host ?? "gpu";
+  return (
+    <div className="lab-term">
+      <div className="lab-term-out" ref={outRef}>
+        {history.length === 0 && (
+          <div className="muted small">
+            One command at a time; output streams here and is kept as a run. On the GPU box the working directory is ~/cortex-lab with the lab venv on PATH. Try <code>nvidia-smi</code>, <code>ls recipes</code>, or <code>python recipes/pretrain_nano.py --smoke --steps 50</code>. Bash blocks in the chapters have a "Run in terminal" button that lands here.
+          </div>
+        )}
+        {history.map((h) => (
+          <div key={h.id} className={`term-entry ${h.status}`}>
+            <div className="term-cmd">
+              <span className="prompt">{h.executor === "ssh" ? `${host} ~/cortex-lab $` : "local $"}</span> {h.cmd}
+              <span className="grow" />
+              <button className="lnk" onClick={() => navigate({ kind: "lab", run: h.id })} title="Open as a run">
+                {h.status}
+              </button>
+            </div>
+            <pre>{h.lines.join("\n") || (h.status === "running" ? "…" : "")}</pre>
+          </div>
+        ))}
+      </div>
+      <div className="lab-term-in">
+        <select className="select sm" value={executor} onChange={(e) => setExecutor(e.target.value as "local" | "ssh")} aria-label="Where">
+          <option value="ssh" disabled={ex.data ? !ex.data.ssh.available : false}>{host}</option>
+          <option value="local">this machine</option>
+        </select>
+        <span className="prompt">$</span>
+        <input ref={inputRef} className="input sm" value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={onKey} spellCheck={false} autoFocus placeholder="command" aria-label="Command" />
+        <button className="primary sm" onClick={() => void run()} disabled={busy || !cmd.trim()}>
+          {busy ? "Running…" : "Run"}
+        </button>
+      </div>
+    </div>
   );
 }

@@ -161,9 +161,16 @@ function Shell() {
   useEffect(() => {
     const onRun = async (e: Event) => {
       const code = String((e as CustomEvent).detail?.code ?? "");
+      const lang = String((e as CustomEvent).detail?.lang ?? "python");
       if (!code.trim()) return;
       try {
         const ex = await api.lab.executors();
+        if (lang === "bash") {
+          // a shell block goes to the terminal: prefill it and let the person press Run
+          navigate({ kind: "lab", terminal: true });
+          window.setTimeout(() => window.dispatchEvent(new CustomEvent("cortex:terminal-prefill", { detail: { cmd: code.trim() } })), 200);
+          return;
+        }
         const executor = ex.ssh.available ? "ssh" : ex.modal.available ? "modal" : "local";
         const r = await api.lab.start({ recipe: "scratch", code, executor });
         toast(`Running the snippet on ${executor === "ssh" ? ex.ssh.host ?? "your GPU box" : executor}`);
@@ -259,7 +266,7 @@ function Shell() {
       view = <TopicView slug={route.slug} topics={topics.data} refresh={vaultTick} />;
       break;
     case "lab":
-      view = <LabView station={route.station} runId={route.run} plan={route.plan} refresh={vaultTick} />;
+      view = <LabView station={route.station} runId={route.run} plan={route.plan} terminal={route.terminal} refresh={vaultTick} />;
       break;
   }
 

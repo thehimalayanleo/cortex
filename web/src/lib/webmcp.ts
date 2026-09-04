@@ -269,6 +269,26 @@ export const webmcpTools: ModelContextTool[] = [
     },
   },
   {
+    name: "lab_plan_add",
+    description: "Add a learning card to the user's plan on the fly (a topic, a paper to work through, a snippet to build, a run, a quiz). kind: custom|read|build|recipe|quiz|station; note: a note slug to open. Use when the user says what they want to learn next.",
+    inputSchema: { type: "object", properties: { title: { type: "string" }, kind: { type: "string" }, note: { type: "string" }, station: { type: "string" }, recipe: { type: "string" } }, required: ["title"] },
+    execute: async (i) => {
+      const p = await api.lab.planAdd({ title: s(i.title, 200), kind: s(i.kind || "custom", 10), note: i.note ? s(i.note, 200) : undefined, station: i.station ? s(i.station, 20) : undefined, recipe: i.recipe ? s(i.recipe, 40) : undefined });
+      changed(); navigate({ kind: "lab", plan: true }); record("lab_plan_add", i, true, s(i.title, 60));
+      return text({ added: p.added, done: p.done, total: p.total });
+    },
+  },
+  {
+    name: "lab_plan_remove",
+    description: "Delete a custom learning card (id starts with custom-). Built-in chapter cards cannot be deleted; move them to done instead.",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+    execute: async (i) => {
+      const p = await api.lab.planRemove(s(i.id, 40));
+      changed(); navigate({ kind: "lab", plan: true }); record("lab_plan_remove", i, true, s(i.id, 40));
+      return text({ done: p.done, total: p.total });
+    },
+  },
+  {
     name: "lab_plan_move",
     description: "Move a learning card to todo|doing|done with an optional comment (for example after the user passes a quiz you gave them, or a run finishes). The board updates in front of the user.",
     inputSchema: { type: "object", properties: { id: { type: "string" }, col: { type: "string" }, comment: { type: "string" } }, required: ["id", "col"] },
@@ -306,6 +326,16 @@ export const webmcpTools: ModelContextTool[] = [
     execute: async (i) => {
       const r = await api.lab.start({ recipe: "scratch", code: s(i.code, 60000), executor: s(i.executor || "ssh", 10), args: s(i.args || "", 500) });
       changed(); navigate({ kind: "lab", run: r.id }); record("run_code", i, true, `code on ${r.executor} · ${r.id}`);
+      return text(r);
+    },
+  },
+  {
+    name: "shell",
+    description: "Run one shell command in the Lab terminal on the user's GPU box (executor ssh, default; cwd ~/cortex-lab) or this machine (local); the person watches the output stream. Never destructive commands unless explicitly asked.",
+    inputSchema: { type: "object", properties: { cmd: { type: "string" }, executor: { type: "string" } }, required: ["cmd"] },
+    execute: async (i) => {
+      const r = await api.lab.start({ recipe: "shell", cmd: s(i.cmd, 4000), executor: s(i.executor || "ssh", 10) });
+      changed(); navigate({ kind: "lab", run: r.id }); record("shell", i, true, `$ ${s(i.cmd, 50)} · ${r.executor}`);
       return text(r);
     },
   },

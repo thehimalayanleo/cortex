@@ -30,7 +30,7 @@ export interface LabExecutors {
 }
 export interface LabRecipe { name: string; file: string; doc: string }
 export type PlanCol = "todo" | "doing" | "done";
-export interface PlanCard { id: string; chapter: number; kind: "read" | "station" | "build" | "recipe" | "quiz"; title: string; col: PlanCol; note?: string; station?: string; recipe?: string; done_at?: string; comment?: string }
+export interface PlanCard { id: string; chapter: number; kind: "read" | "station" | "build" | "recipe" | "quiz" | "custom"; title: string; col: PlanCol; note?: string; station?: string; recipe?: string; done_at?: string; comment?: string; custom?: boolean }
 export interface LabPlan { columns: PlanCol[]; cards: PlanCard[]; done: number; total: number; xp: number; xp_total: number; level: number; level_name: string; next_level_xp: number; streak: number; done_today: number; xp_by_kind: Record<string, number> }
 export interface GpuStatus {
   host: string | null; reachable: boolean; ready: boolean; message?: string; busy?: boolean; torch?: string; cuda?: boolean; python?: string;
@@ -43,7 +43,7 @@ export interface LabRun {
   status: "queued" | "running" | "stopping" | "done" | "failed" | "stopped";
   started: string; ended: string | null; exit: number | null; error?: string;
   last?: Record<string, number> | null;
-  script?: string; code_preview?: string;
+  script?: string; code_preview?: string; cmd?: string;
 }
 export interface LabRunDetail extends LabRun { log: string[]; log_lines: number; metrics: Record<string, number>[]; rollouts: Record<string, unknown>[]; result: Record<string, unknown> | null }
 
@@ -218,7 +218,7 @@ export const api = {
     chapters: () => request<LabChapter[]>("/lab/chapters"),
     runs: (limit = 50) => request<LabRun[]>(`/lab/runs${qs({ limit })}`),
     run: (id: string, tail = 200) => request<LabRunDetail>(`/lab/runs/${encodeURIComponent(id)}${qs({ tail })}`),
-    start: (data: { recipe: string; args?: string; executor?: string; code?: string }) => request<LabRun>("/lab/runs", { method: "POST", body: JSON.stringify(data) }),
+    start: (data: { recipe: string; args?: string; executor?: string; code?: string; cmd?: string }) => request<LabRun>("/lab/runs", { method: "POST", body: JSON.stringify(data) }),
     script: (id: string) => request<{ code: string }>(`/lab/runs/${encodeURIComponent(id)}/script`),
     stop: (id: string) => request<{ ok: boolean }>(`/lab/runs/${encodeURIComponent(id)}/stop`, { method: "POST" }),
     remove: (id: string) => request<{ ok: boolean }>(`/lab/runs/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -226,6 +226,8 @@ export const api = {
     gpu: () => request<GpuStatus>("/lab/gpu"),
     plan: () => request<LabPlan>("/lab/plan"),
     planMove: (id: string, col: PlanCol, comment?: string) => request<LabPlan>("/lab/plan/move", { method: "POST", body: JSON.stringify({ id, col, comment }) }),
+    planAdd: (data: { title: string; kind?: string; note?: string; station?: string; recipe?: string; chapter?: number }) => request<LabPlan & { added?: string }>("/lab/plan/cards", { method: "POST", body: JSON.stringify(data) }),
+    planRemove: (id: string) => request<LabPlan>(`/lab/plan/cards/${encodeURIComponent(id)}`, { method: "DELETE" }),
     gpuSetup: (onEvent: (e: GpuSetupEvent) => void, signal?: AbortSignal) => stream<GpuSetupEvent>("/lab/gpu/setup", {}, onEvent, signal),
   },
 

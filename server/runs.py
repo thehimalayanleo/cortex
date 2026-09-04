@@ -75,10 +75,21 @@ def recipes() -> list[dict[str, Any]]:
             pass
         out.append({"name": p.stem, "file": f"lab/recipes/{p.name}", "doc": doc[:400]})
     out.append({"name": "scratch", "file": "", "doc": "Run your own Python (from a chapter's snippet, or pasted): the code is saved with the run and executed on the chosen machine. Print METRIC {...} lines to get charts."})
+    out.append({"name": "shell", "file": "", "doc": "The terminal: one shell command at a time on this machine or the GPU box, output streamed here."})
     return out
 
 
-def _command(executor: str, recipe: str, args: str, script: Path | None = None) -> list[str]:
+def _command(executor: str, recipe: str, args: str, script: Path | None = None, cmd: str | None = None) -> list[str]:
+    if cmd is not None:  # the terminal: one shell command, streamed, in the lab folder of the chosen machine
+        if executor == "local":
+            return ["bash", "-lc", cmd]
+        if executor == "ssh":
+            host = _ssh_host()
+            if not host:
+                raise ValueError("CORTEX_SSH_HOST is not set")
+            py_dir = os.path.dirname(_ssh_python())
+            return ["ssh", *SSH_OPTS, host, f"export PATH={py_dir}:$HOME/.local/bin:$PATH; mkdir -p ~/cortex-lab && cd ~/cortex-lab && bash -lc {shlex.quote(cmd)}"]
+        raise ValueError("the terminal runs locally or on the GPU box (ssh)")
     script = script or (RECIPES / f"{recipe}.py")
     if not script.exists():
         raise ValueError(f"no such recipe: {recipe}")
@@ -216,8 +227,8 @@ def _write_meta(d: Path, meta: dict) -> None:
     (d / "meta.json").write_text(json.dumps(meta, indent=2))
 
 
-def start(recipe: str, args: str = "", executor: str = "local", code: str | None = None) -> dict[str, Any]:
-    """Launch a recipe, or with code= run that Python source as a one-off script (the "scratch" recipe)."""
+def start(recipe: str, args: str = "", executor: str = "local", code: str | None = None, cmd: str | None = None) -> dict[str, Any]:
+    """Launch a recipe; with code= run that Python source as a one-off script (the "scratch" recipe); with cmd= run a shell command (the "shell" recipe)."""
     ex = executors()
     if executor not in ("local", "ssh", "modal"):
         raise ValueError("executor must be local, ssh, or modal")
@@ -236,6 +247,14 @@ def start(recipe: str, args: str = "", executor: str = "local", code: str | None
         Path(meta["script"]).write_text(code)
     elif recipe == "scratch":
         raise ValueError("the scratch recipe needs code")
+    if cmd is not None:
+        if not cmd.strip():
+            raise ValueError("no command given")
+        meta["recipe"] = "shell"
+        meta["cmd"] = cmd.strip()[:4000]
+        meta["code_preview"] = cmd.strip().splitlines()[0][:80]
+    elif recipe == "shell":
+        raise ValueError("the shell recipe needs a command")
     _write_meta(d, meta)
     threading.Thread(target=_run, args=(d, meta), daemon=True).start()
     return meta
@@ -253,10 +272,10 @@ def _run(d: Path, meta: dict) -> None:
                 host = os.environ["CORTEX_SSH_HOST"]
                 subprocess.run(["ssh", *SSH_OPTS, host, "mkdir -p ~/cortex-lab/scratch"], check=True, timeout=60)
                 subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/cm-%r@%h:%p", str(script), f"{host}:~/cortex-lab/scratch/{script.name}"], check=True, timeout=60)
-        cmd = _command(meta["executor"], meta["recipe"], meta["args"], script)
+        cmd = _command(meta["executor"], meta["recipe"], meta["args"], script, meta.get("cmd"))
         log.write("[cortex] $ " + " ".join(shlex.quote(c) for c in cmd) + "\n")
         env = dict(os.environ, PYTHONUNBUFFERED="1")
-        proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+        proc = subprocess.Popen(cmd, cwd=str(LAB if meta.get("cmd") else ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         with _lock:
             _procs[meta["id"]] = proc
         meta["status"] = "running"
@@ -453,6 +472,9 @@ def plan() -> dict[str, Any]:
             saved = {}
     state = saved.get("cards", {})
     cards = _default_cards()
+    for c in saved.get("custom", []):  # cards the user (or the chat) added; these can be deleted, built-ins cannot
+        if isinstance(c, dict) and c.get("id"):
+            cards.append({"id": c["id"], "chapter": int(c.get("chapter") or 0), "kind": c.get("kind") or "custom", "title": str(c.get("title") or "")[:200], "note": c.get("note"), "station": c.get("station"), "recipe": c.get("recipe"), "col": "todo", "custom": True, "created": c.get("created")})
     for c in cards:
         st = state.get(c["id"])
         if isinstance(st, dict):
@@ -511,4 +533,45 @@ def plan_move(card_id: str, col: str, comment: str | None = None) -> dict[str, A
     if comment is not None:
         entry["comment"] = comment[:500]
     p.write_text(json.dumps(saved, indent=1))
+    return plan()
+
+
+def _load_plan_file() -> dict[str, Any]:
+    p = _plan_path()
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def plan_add(title: str, kind: str = "custom", note: str | None = None, station: str | None = None, recipe: str | None = None, chapter: int | None = None) -> dict[str, Any]:
+    """Add a learning card on the fly (a topic, a paper to work through, a run to do). Returns the plan."""
+    title = title.strip()
+    if not title:
+        raise ValueError("a card needs a title")
+    if kind not in ("custom", "read", "station", "build", "recipe", "quiz"):
+        kind = "custom"
+    saved = _load_plan_file()
+    custom = saved.setdefault("custom", [])
+    cid = "custom-" + uuid.uuid4().hex[:8]
+    custom.append({"id": cid, "title": title[:200], "kind": kind, "note": note, "station": station, "recipe": recipe, "chapter": chapter or 0, "created": _now()})
+    _plan_path().write_text(json.dumps(saved, indent=1))
+    out = plan()
+    out["added"] = cid
+    return out
+
+
+def plan_remove(card_id: str) -> dict[str, Any]:
+    """Delete a custom card. Built-in chapter cards cannot be deleted (move them to done instead)."""
+    if not card_id.startswith("custom-"):
+        raise ValueError("built-in chapter cards cannot be deleted; move them to done, or add your own cards")
+    saved = _load_plan_file()
+    before = len(saved.get("custom", []))
+    saved["custom"] = [c for c in saved.get("custom", []) if c.get("id") != card_id]
+    saved.get("cards", {}).pop(card_id, None)
+    if len(saved["custom"]) == before:
+        raise ValueError(f"no such card {card_id}")
+    _plan_path().write_text(json.dumps(saved, indent=1))
     return plan()

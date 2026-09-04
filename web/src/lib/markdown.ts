@@ -3,6 +3,28 @@ import MarkdownIt from "markdown-it";
 import type StateInline from "markdown-it/lib/rules_inline/state_inline.mjs";
 import type StateBlock from "markdown-it/lib/rules_block/state_block.mjs";
 import katex from "katex";
+import hljs from "highlight.js/lib/core";
+import langPython from "highlight.js/lib/languages/python";
+import langBash from "highlight.js/lib/languages/bash";
+import langJs from "highlight.js/lib/languages/javascript";
+import langTs from "highlight.js/lib/languages/typescript";
+import langJson from "highlight.js/lib/languages/json";
+import langYaml from "highlight.js/lib/languages/yaml";
+import langC from "highlight.js/lib/languages/c";
+import langCpp from "highlight.js/lib/languages/cpp";
+import langDiff from "highlight.js/lib/languages/diff";
+import langLatex from "highlight.js/lib/languages/latex";
+hljs.registerLanguage("python", langPython);
+hljs.registerLanguage("bash", langBash);
+hljs.registerLanguage("javascript", langJs);
+hljs.registerLanguage("typescript", langTs);
+hljs.registerLanguage("json", langJson);
+hljs.registerLanguage("yaml", langYaml);
+hljs.registerLanguage("c", langC);
+hljs.registerLanguage("cpp", langCpp);
+hljs.registerLanguage("diff", langDiff);
+hljs.registerLanguage("latex", langLatex);
+const LANG_ALIAS: Record<string, string> = { py: "python", sh: "bash", shell: "bash", zsh: "bash", console: "bash", js: "javascript", ts: "typescript", tsx: "typescript", jsx: "javascript", yml: "yaml", cu: "cpp", cuda: "cpp", tex: "latex", lean: "", lean4: "", triton: "python" };
 
 const md = new MarkdownIt({
   html: true, // only a small whitelist survives: see sanitizeHtml below
@@ -24,13 +46,19 @@ function sanitizeHtml(raw: string): string {
     return closing ? `</${t}>` : `<${t}${open}>`;
   });
 }
-const defaultFence = md.renderer.rules.fence!;
-md.renderer.rules.fence = (tokens, idx, options, env, self) => {
-  const html = defaultFence(tokens, idx, options, env, self);
-  const lang = (tokens[idx].info || "").trim().split(/\s+/)[0].toLowerCase();
-  if (lang !== "python" && lang !== "py") return html;
-  // The app turns this into a real run (lab/recipes protocol: METRIC lines become charts).
-  return `<div class="codeblock" data-lang="python"><div class="codebar"><span>python</span><button type="button" class="run-code" title="Run this snippet on your GPU (or locally) and watch the output in the Lab">Run on GPU</button></div>${html}</div>`;
+const escapeHtml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+md.renderer.rules.fence = (tokens, idx) => {
+  const raw = (tokens[idx].info || "").trim().split(/\s+/)[0].toLowerCase();
+  const lang = LANG_ALIAS[raw] ?? raw;
+  const code = tokens[idx].content;
+  let body: string;
+  if (lang && hljs.getLanguage(lang)) body = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+  else body = escapeHtml(code);
+  const lines = code.replace(/\n$/, "").split("\n").length;
+  const label = raw || "text";
+  const runnable = lang === "python" || lang === "bash";
+  // The Run button hands the code to the Lab: python runs as a scratch script, bash as a terminal command.
+  return `<div class="codeblock" data-lang="${escapeHtml(lang || raw)}"><div class="codebar"><span class="lang">${escapeHtml(label)}</span><span class="lines">${lines} lines</span><span class="grow"></span><button type="button" class="copy-code" title="Copy to clipboard">Copy</button>${runnable ? `<button type="button" class="run-code" title="${lang === "bash" ? "Run in the Lab terminal (your GPU box by default)" : "Run this snippet on your GPU (or locally) and watch the output in the Lab"}">${lang === "bash" ? "Run in terminal" : "Run on GPU"}</button>` : ""}</div><pre><code class="hljs language-${escapeHtml(lang || "text")}">${body}</code></pre></div>`;
 };
 md.renderer.rules.html_block = (tokens, idx) => sanitizeHtml(tokens[idx].content);
 md.renderer.rules.html_inline = (tokens, idx) => sanitizeHtml(tokens[idx].content);

@@ -11,7 +11,7 @@ export type Route =
   | { kind: "notes"; noteKind?: NoteKind }
   | { kind: "topics" }
   | { kind: "topic"; slug: string }
-  | { kind: "lab"; station?: string; run?: string; plan?: boolean };
+  | { kind: "lab"; station?: string; run?: string; plan?: boolean; terminal?: boolean };
 
 export function routeToHash(r: Route): string {
   switch (r.kind) {
@@ -32,7 +32,7 @@ export function routeToHash(r: Route): string {
     case "topic":
       return `#/topic/${encodeURIComponent(r.slug)}`;
     case "lab":
-      return r.plan ? "#/lab/plan" : r.run ? `#/lab/run/${encodeURIComponent(r.run)}` : r.station ? `#/lab/${encodeURIComponent(r.station)}` : "#/lab";
+      return r.terminal ? "#/lab/terminal" : r.plan ? "#/lab/plan" : r.run ? `#/lab/run/${encodeURIComponent(r.run)}` : r.station ? `#/lab/${encodeURIComponent(r.station)}` : "#/lab";
   }
 }
 
@@ -62,6 +62,7 @@ export function parseHash(hash: string): Route {
       if (segs[1] === "run" && segs[2]) return { kind: "lab", run: segs[2] };
       if (segs[1] === "run") return { kind: "lab", run: "" };
       if (segs[1] === "plan") return { kind: "lab", plan: true };
+      if (segs[1] === "terminal") return { kind: "lab", terminal: true };
       return { kind: "lab", station: segs[1] || undefined };
     default:
       // Old #/library and #/projects links land on the home view (the rail is the library now).
@@ -79,6 +80,7 @@ export function parseCortexLink(href: string): Route | null {
   if (type === "lab") {
     const mm = /^run\/(.+)$/.exec(id);
     if (id === "plan") return { kind: "lab", plan: true };
+    if (id === "terminal") return { kind: "lab", terminal: true };
     if (id === "runs") return { kind: "lab", run: "" };
     return mm ? { kind: "lab", run: mm[1] } : { kind: "lab", station: id || undefined };
   }

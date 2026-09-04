@@ -50,7 +50,9 @@ function draftsEqual(a: Draft, b: Draft): boolean {
 
 export function NoteEditor({ note, topics, banner, allowDelete = true, autoFocus }: Props) {
   const { toast } = useToast();
-  const [mode, setMode] = useLocalStorage<ViewMode>("cortex.note.mode", "split");
+  // Lab chapters open in reading mode; ordinary notes remember their own split.
+  const isLab = note.slug.startsWith("lab-");
+  const [mode, setMode] = useLocalStorage<ViewMode>(isLab ? "cortex.lab.mode" : "cortex.note.mode", isLab ? "preview" : "split");
 
   // The API splits frontmatter and body; strip a stray inline block defensively.
   const initial = useMemo(() => {

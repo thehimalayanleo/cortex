@@ -151,7 +151,7 @@ def build_parser():
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--max-new", type=int, default=None)
-    p.add_argument("--warm-steps", type=int, default=150, help="smoke: SFT steps on demonstrations before RL (keep it short: a memorized policy has no sampling variance and GRPO gets zero advantage)")
+    p.add_argument("--warm-steps", type=int, default=250, help="smoke: SFT steps on demonstrations before RL (keep it short: a memorized policy has no sampling variance and GRPO gets zero advantage)")
     p.add_argument("--warm-tasks", type=int, default=150, help="smoke: number of demonstrations for the warm-up")
     p.add_argument("--n-tasks", type=int, default=300)
     p.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
@@ -208,10 +208,12 @@ def warm_start(policy, tok, tasks, steps, device):
     ids, mask = C.pad_batch(seqs, tok.pad_id)
     lab, _ = C.pad_batch(labels, -100)
     lab[~mask] = -100
-    x, y = ids[:, :-1].to(device), lab[:, 1:].to(device)
     opt = C.make_adamw(policy, 3e-3, 0.0)
+    gen = torch.Generator().manual_seed(0)
     policy.train()
     for step in range(steps):
+        ix = torch.randint(0, len(seqs), (32,), generator=gen)
+        x, y = ids[ix, :-1].to(device), lab[ix, 1:].to(device)
         loss = C.lm_loss(policy(x), y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -342,7 +344,7 @@ def real(args):
 
 def main():
     args = build_parser().parse_args()
-    d = dict(steps=60, group=4, batch=4, lr=2e-4, max_new=80) if args.smoke else dict(steps=200, group=8, batch=8, lr=1e-5, max_new=128)
+    d = dict(steps=60, group=4, batch=8, lr=2e-4, max_new=80) if args.smoke else dict(steps=200, group=8, batch=8, lr=1e-5, max_new=128)
     for k, v in d.items():
         if getattr(args, k) is None:
             setattr(args, k, v)

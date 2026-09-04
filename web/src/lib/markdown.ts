@@ -5,11 +5,27 @@ import type StateBlock from "markdown-it/lib/rules_block/state_block.mjs";
 import katex from "katex";
 
 const md = new MarkdownIt({
-  html: false,
+  html: true, // only a small whitelist survives: see sanitizeHtml below
+
   linkify: true,
   typographer: false,
   breaks: false,
 });
+
+// Raw HTML in notes is reduced to a harmless whitelist (collapsible answers in the lab chapters, sub/sup, kbd, mark);
+// everything else is shown as escaped text, so no script, style, iframe, or event handler ever reaches the DOM.
+const ALLOWED = new Set(["details", "summary", "sub", "sup", "kbd", "mark", "br", "hr", "small", "abbr"]);
+function sanitizeHtml(raw: string): string {
+  return raw.replace(/<\/?([A-Za-z][A-Za-z0-9-]*)(\s[^<>]*)?>/g, (m, tag: string, attrs: string | undefined) => {
+    const t = tag.toLowerCase();
+    if (!ALLOWED.has(t)) return m.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const closing = m.startsWith("</");
+    const open = t === "details" && !closing && /\bopen\b/i.test(attrs ?? "") ? " open" : "";
+    return closing ? `</${t}>` : `<${t}${open}>`;
+  });
+}
+md.renderer.rules.html_block = (tokens, idx) => sanitizeHtml(tokens[idx].content);
+md.renderer.rules.html_inline = (tokens, idx) => sanitizeHtml(tokens[idx].content);
 
 // Bare cortex://note/x links in text (e.g. chat replies) become anchors.
 md.linkify.add("cortex:", {

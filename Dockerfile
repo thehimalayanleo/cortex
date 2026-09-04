@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils &
 WORKDIR /app
 COPY server/ server/
 COPY scripts/ scripts/
+COPY lab/ lab/
 COPY --from=web /web/dist web/dist
 RUN pip install --no-cache-dir fastapi "uvicorn[standard]" openai pypdf pyyaml python-multipart
 ENV CORTEX_VAULT=/data/cortex CORTEX_DEMO=1 PORT=8788

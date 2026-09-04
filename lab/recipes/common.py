@@ -331,11 +331,11 @@ def rope_cache(seq_len: int, head_dim: int, base: float = 10000.0) -> tuple[torc
     return freqs.cos(), freqs.sin()
 
 
-def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """x: (B, H, S, D). Rotates pairs (x[..., :D/2], x[..., D/2:]) by position-dependent angles."""
+def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, pos: int = 0) -> torch.Tensor:
+    """x: (B, H, S, D) holding positions pos .. pos+S-1. Rotates the pairs (x[..., :D/2], x[..., D/2:])."""
     S = x.shape[-2]
-    cos = cos[:S].to(x.dtype)[None, None]
-    sin = sin[:S].to(x.dtype)[None, None]
+    cos = cos[pos: pos + S].to(x.dtype)[None, None]
+    sin = sin[pos: pos + S].to(x.dtype)[None, None]
     x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2:]
     return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
 
@@ -351,23 +351,38 @@ class Attention(nn.Module):
         self.causal = cfg.causal
         self.dropout = cfg.dropout
 
-    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, attn_mask: torch.Tensor | None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, attn_mask: torch.Tensor | None,
+                cache: dict | None = None, pos: int = 0) -> torch.Tensor:
+        """x holds positions pos..pos+S-1. attn_mask: (B, T) bool over ALL keys (cached + new), True = real token.
+
+        cache is a dict; when given, the new keys/values are appended to cache["k"], cache["v"]
+        and attention runs over the whole cached prefix (KV-cached decoding).
+        """
         B, S, C = x.shape
         q, k, v = self.qkv(x).split(C, dim=-1)
         q = q.view(B, S, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(B, S, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, S, self.n_head, self.head_dim).transpose(1, 2)
-        q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
-        if attn_mask is None:
-            y = F.scaled_dot_product_attention(q, k, v, is_causal=self.causal, dropout_p=self.dropout if self.training else 0.0)
+        q, k = apply_rope(q, cos, sin, pos), apply_rope(k, cos, sin, pos)
+        if cache is not None:
+            if "k" in cache:
+                k = torch.cat([cache["k"], k], 2)
+                v = torch.cat([cache["v"], v], 2)
+            cache["k"], cache["v"] = k, v
+        T = k.shape[2]
+        drop = self.dropout if self.training else 0.0
+        if attn_mask is None and pos == 0 and T == S:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=self.causal, dropout_p=drop)
         else:
-            # attn_mask: (B, S) bool, True where the key is a real token. Combine with causal if needed.
-            m = attn_mask[:, None, None, :].expand(B, 1, S, S)
+            key_ok = attn_mask if attn_mask is not None else torch.ones(B, T, dtype=torch.bool, device=x.device)
+            m = key_ok[:, None, None, :].expand(B, 1, S, T)
+            qpos = torch.arange(pos, pos + S, device=x.device)[:, None]
+            kpos = torch.arange(T, device=x.device)[None, :]
             if self.causal:
-                m = m & torch.ones(S, S, dtype=torch.bool, device=x.device).tril()[None, None]
+                m = m & (kpos <= qpos)[None, None]
             # a padded query row would be fully masked and produce NaN; let every position see itself
-            m = m | torch.eye(S, dtype=torch.bool, device=x.device)[None, None]
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=m, dropout_p=self.dropout if self.training else 0.0)
+            m = m | (kpos == qpos)[None, None]
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=m, dropout_p=drop)
         return self.proj(y.transpose(1, 2).contiguous().view(B, S, C))
 
 
@@ -392,8 +407,8 @@ class Block(nn.Module):
         self.n2 = RMSNorm(cfg.d_model)
         self.mlp = SwiGLU(cfg.d_model)
 
-    def forward(self, x, cos, sin, attn_mask):
-        x = x + self.attn(self.n1(x), cos, sin, attn_mask)
+    def forward(self, x, cos, sin, attn_mask, cache=None, pos=0):
+        x = x + self.attn(self.n1(x), cos, sin, attn_mask, cache, pos)
         return x + self.mlp(self.n2(x))
 
 
@@ -427,20 +442,27 @@ class GPT(nn.Module):
         elif isinstance(m, nn.Embedding):
             nn.init.normal_(m.weight, std=0.02)
 
-    def hidden(self, idx: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def new_cache(self) -> list[dict]:
+        """One KV dict per (loop iteration, layer)."""
+        return [dict() for _ in range(self.cfg.loop * self.cfg.n_layer)]
+
+    def hidden(self, idx: torch.Tensor, attn_mask: torch.Tensor | None = None, cache: list[dict] | None = None,
+               pos: int = 0) -> torch.Tensor:
         S = idx.shape[1]
-        assert S <= self.cfg.seq_len, f"sequence {S} longer than seq_len {self.cfg.seq_len}"
+        assert pos + S <= self.cfg.seq_len, f"positions up to {pos + S} exceed seq_len {self.cfg.seq_len}"
         e = self.tok_emb(idx)
         h = e
         for t in range(self.cfg.loop):
             if t > 0:
                 h = h + e
-            for blk in self.blocks:
-                h = blk(h, self.rope_cos, self.rope_sin, attn_mask)
+            for i, blk in enumerate(self.blocks):
+                c = cache[t * self.cfg.n_layer + i] if cache is not None else None
+                h = blk(h, self.rope_cos, self.rope_sin, attn_mask, c, pos)
         return self.norm(h)
 
-    def forward(self, idx: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        return self.lm_head(self.hidden(idx, attn_mask))
+    def forward(self, idx: torch.Tensor, attn_mask: torch.Tensor | None = None, cache: list[dict] | None = None,
+                pos: int = 0) -> torch.Tensor:
+        return self.lm_head(self.hidden(idx, attn_mask, cache, pos))
 
     def num_params(self, non_embedding: bool = False) -> int:
         n = sum(p.numel() for p in self.parameters())
@@ -471,14 +493,25 @@ def generate(model: GPT, idx: torch.Tensor, max_new_tokens: int, temperature: fl
     Prompts of different lengths can be batched by LEFT-padding them and passing
     attn_mask (B, S) with False at pad positions (see left_pad). Rotary positions
     are relative, so a shifted start does not change what the real tokens see.
+
+    Decoding uses a KV cache when prompt + max_new_tokens fits in seq_len (each
+    step then feeds one token); otherwise it falls back to re-running the last
+    seq_len tokens every step (a sliding window, no cache).
     """
     model.eval()
-    B = idx.shape[0]
+    B, S0 = idx.shape
     done = torch.zeros(B, dtype=torch.bool, device=idx.device)
-    for _ in range(max_new_tokens):
-        ctx = idx[:, -model.cfg.seq_len:]
-        m = attn_mask[:, -model.cfg.seq_len:] if attn_mask is not None else None
-        logits = model(ctx, attn_mask=m)[:, -1, :].float()
+    use_cache = S0 + max_new_tokens <= model.cfg.seq_len
+    cache = model.new_cache() if use_cache else None
+    logits = None
+    for step in range(max_new_tokens):
+        if use_cache:
+            inp = idx if step == 0 else idx[:, -1:]
+            logits = model(inp, attn_mask=attn_mask, cache=cache, pos=0 if step == 0 else idx.shape[1] - 1)[:, -1, :].float()
+        else:
+            ctx = idx[:, -model.cfg.seq_len:]
+            m = attn_mask[:, -model.cfg.seq_len:] if attn_mask is not None else None
+            logits = model(ctx, attn_mask=m)[:, -1, :].float()
         if greedy or temperature <= 0:
             nxt = logits.argmax(-1, keepdim=True)
         else:

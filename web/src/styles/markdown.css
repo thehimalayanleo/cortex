@@ -145,3 +145,7 @@
   color: var(--text-3);
   font-style: italic;
 }
+
+.md details{border:1px solid var(--border);border-radius:8px;padding:6px 12px;margin:8px 0;background:var(--surface)}
+.md details summary{cursor:pointer;color:var(--accent-text);font-weight:500}
+.md details[open] summary{margin-bottom:6px}

@@ -65,6 +65,12 @@ def _startup() -> None:
     (vault.VAULT / "assets").mkdir(exist_ok=True)
     threading.Thread(target=_watch_inbox, args=(INBOX,), daemon=True).start()
     try:
+        stale = runs.mark_stale()
+        if stale:
+            print(f"runs: marked {stale} stale run(s) failed after restart")
+    except Exception as e:
+        print("runs: stale check failed", e)
+    try:
         n = runs.sync_chapters_into_vault()
         if n:
             vault.rebuild_index()

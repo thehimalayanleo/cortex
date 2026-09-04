@@ -430,7 +430,9 @@ def read_run(rid: str, tail: int = 200, max_metrics: int = 2000, max_rollouts: i
                 metrics.append(json.loads(line))
             except Exception:
                 pass
-    if len(metrics) > max_metrics:  # thin evenly so charts stay light
+    if max_metrics <= 0:
+        metrics = []
+    elif len(metrics) > max_metrics:  # thin evenly so charts stay light
         step = len(metrics) / max_metrics
         metrics = [metrics[int(i * step)] for i in range(max_metrics)]
     rollouts: list[dict] = []
@@ -624,3 +626,23 @@ def plan_remove(card_id: str) -> dict[str, Any]:
         raise ValueError(f"no such card {card_id}")
     _plan_path().write_text(json.dumps(saved, indent=1))
     return plan()
+
+
+def mark_stale() -> int:
+    """At server start: runs left queued/running by a previous process cannot be tracked any more; mark them failed."""
+    n = 0
+    for d in runs_dir().iterdir():
+        mp = d / "meta.json"
+        if not mp.exists():
+            continue
+        try:
+            m = json.loads(mp.read_text())
+        except Exception:
+            continue
+        if m.get("status") in ("queued", "running", "stopping"):
+            m["status"] = "failed"
+            m["ended"] = _now()
+            m["error"] = "the Cortex server restarted while this run was in flight"
+            _write_meta(d, m)
+            n += 1
+    return n

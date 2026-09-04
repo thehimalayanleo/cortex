@@ -11,10 +11,13 @@ export type Route =
   | { kind: "notes"; noteKind?: NoteKind }
   | { kind: "topics" }
   | { kind: "topic"; slug: string }
-  | { kind: "lab"; station?: string; run?: string; plan?: boolean; terminal?: boolean; studio?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string };
+  | { kind: "lab"; station?: string; run?: string; plan?: boolean; terminal?: boolean; studio?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string }
+  | { kind: "galaxy" };
 
 export function routeToHash(r: Route): string {
   switch (r.kind) {
+    case "galaxy":
+      return "#/galaxy";
     case "home":
       return "#/";
     case "daily":
@@ -58,6 +61,8 @@ export function parseHash(hash: string): Route {
       return { kind: "topics" };
     case "topic":
       return rest ? { kind: "topic", slug: rest } : { kind: "topics" };
+    case "galaxy":
+      return { kind: "galaxy" };
     case "lab":
       if (segs[1] === "run" && segs[2]) return { kind: "lab", run: segs[2] };
       if (segs[1] === "run") return { kind: "lab", run: "" };
@@ -75,11 +80,12 @@ export function parseHash(hash: string): Route {
 
 /** cortex://note/<slug>, cortex://paper/<id>, cortex://project/<slug> -> Route */
 export function parseCortexLink(href: string): Route | null {
-  const m = /^cortex:\/\/(note|paper|project|topic|daily|lab)(?:\/(.*))?$/i.exec(href.trim());
+  const m = /^cortex:\/\/(note|paper|project|topic|daily|lab|galaxy)(?:\/(.*))?$/i.exec(href.trim());
   if (!m) return null;
   const type = m[1].toLowerCase();
   const id = m[2] ? decodeURIComponent(m[2].replace(/\/+$/, "")) : "";
   if (type === "daily") return { kind: "daily" };
+  if (type === "galaxy") return { kind: "galaxy" };
   if (type === "lab") {
     const mm = /^run\/(.+)$/.exec(id);
     if (id === "plan") return { kind: "lab", plan: true };

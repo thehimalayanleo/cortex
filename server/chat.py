@@ -154,6 +154,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "stage": {"type": "string"}}, "required": ["id", "stage"]}}},
     {"type": "function", "function": {"name": "search_arxiv", "description": "Search arXiv on the web by topic when the vault has nothing (or too little). Returns up to n results with arxiv id, title, authors, year, summary, and whether it is already in the library. Follow with file_paper(arxiv=<id>) to import one.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "n": {"type": "integer"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "galaxy", "description": "The library as a map: universes (broad areas) containing solar systems (tight clusters of papers) with labels and sizes, computed by embedding every paper (bge-small) and clustering (DBSCAN). Give a solar system id to list its papers. Use to answer 'what areas does my library cover' or 'which papers sit near X'.",
+        "parameters": {"type": "object", "properties": {"system": {"type": "integer"}}}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "offset": {"type": "integer"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "file_paper", "description": "Add a paper to the library from an arXiv id/URL (downloaded) or a local PDF path. Returns its metadata.",
@@ -310,6 +312,13 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
     if name == "append_daily":
         n = vault.append_daily(str(a["text"]))
         return {"slug": n["slug"]}, str(a["text"])[:80], f"cortex://note/{n['slug']}"
+    if name == "galaxy":
+        from . import galaxy
+        if a.get("system") is not None:
+            rows = galaxy.system_papers(int(a["system"]))
+            return rows, f"solar system {a['system']} · {len(rows)} papers", "cortex://galaxy"
+        sm = galaxy.summary()
+        return sm, f"galaxy · {len(sm['solar_systems'])} systems in {len(sm['universes'])} universes", "cortex://galaxy"
     if name == "search_arxiv":
         rows = vault.arxiv_search(str(a["query"]), int(a.get("n") or 5))
         return rows, f"arxiv: {str(a['query'])[:40]} · {len(rows)} results", ""

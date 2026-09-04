@@ -99,6 +99,8 @@ def _command(executor: str, recipe: str, args: str, script: Path | None = None, 
     extra = shlex.split(args or "")
     if executor == "local":
         py = shlex.split(os.environ.get("CORTEX_LOCAL_PYTHON") or "uv run --python 3.11 --with torch --with numpy --with pillow python")
+        if recipe == "galaxy_index" and os.environ.get("CORTEX_GALAXY_PYTHON"):
+            py = shlex.split(os.environ["CORTEX_GALAXY_PYTHON"])
         return [*py, str(script), *extra]
     if executor == "ssh":
         host = os.environ.get("CORTEX_SSH_HOST", "").strip()

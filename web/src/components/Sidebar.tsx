@@ -166,6 +166,9 @@ export function Sidebar({ route, space, projects, onSpace, onNewSpace, onFiled, 
           <button className="lnk" onClick={() => navigate({ kind: "lab" })} aria-current={route.kind === "lab" || undefined} title="Training Lab: train small models in the browser, real ones on a GPU">
             Lab
           </button>
+          <button className="lnk" onClick={() => navigate({ kind: "galaxy" })} aria-current={route.kind === "galaxy" || undefined} title="Galaxy: the library as a map of solar systems and universes">
+            Galaxy
+          </button>
           <span className="grow" />
           <button className="icon-btn" onClick={cycleTheme} title={`${themeLabel} (click to change)`} aria-label={themeLabel}>
             {themePref === "dark" ? <MoonIcon /> : themePref === "light" ? <SunIcon /> : <AutoIcon />}

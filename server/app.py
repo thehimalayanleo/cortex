@@ -64,6 +64,7 @@ def _startup() -> None:
     INBOX.mkdir(exist_ok=True)
     (vault.VAULT / "assets").mkdir(exist_ok=True)
     threading.Thread(target=_watch_inbox, args=(INBOX,), daemon=True).start()
+    galaxy.start_watcher()
     try:
         stale = runs.mark_stale()
         if stale:
@@ -870,6 +871,26 @@ def studio_scene_file(sid: str, name: str):
     if not p:
         raise HTTPException(404, "not assembled yet")
     return FileResponse(str(p), headers={"Cache-Control": "private, max-age=60"})
+
+
+# ---------------------------------------------------------------- the paper galaxy (solar systems and universes of the library)
+
+@app.get("/api/galaxy")
+def galaxy_get():
+    return galaxy.read()
+
+
+@app.get("/api/galaxy/summary")
+def galaxy_summary():
+    return galaxy.summary()
+
+
+@app.post("/api/galaxy/rebuild")
+def galaxy_rebuild(smoke: bool = False):
+    try:
+        return galaxy.rebuild(smoke)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/telemetry")

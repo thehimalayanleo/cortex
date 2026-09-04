@@ -132,6 +132,23 @@ export const webmcpTools: ModelContextTool[] = [
     },
   },
   {
+    name: "galaxy",
+    description: "The library as a map: universes (broad areas) containing solar systems (tight clusters of papers), labelled and sized; opens the Galaxy view. Give system to list that solar system's papers.",
+    inputSchema: { type: "object", properties: { system: { type: "integer" } } },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      navigate({ kind: "galaxy" });
+      const g = await api.galaxy.get();
+      if (typeof i.system === "number") {
+        const rows = g.papers.filter((p) => p.cluster === i.system).map((p) => ({ id: p.id, title: p.title, year: p.year, status: p.status }));
+        record("galaxy", i, true, `system ${i.system} · ${rows.length}`);
+        return text(rows);
+      }
+      record("galaxy", i, true, `${g.clusters.length} systems`);
+      return text({ n: g.n, model: g.model, universes: g.universes.map((u) => ({ id: u.id, label: u.label, size: u.size })), solar_systems: g.clusters.filter((c) => c.id >= 0).map((c) => ({ id: c.id, label: c.label, size: c.size, universe: c.universe })) });
+    },
+  },
+  {
     name: "search_arxiv",
     description: "Search arXiv on the web by topic when the brain has nothing: returns up to n results with arxiv id, title, authors, year, summary, and whether each is already in the library. Follow with file_paper to import one.",
     inputSchema: { type: "object", properties: { query: { type: "string" }, n: { type: "integer" } }, required: ["query"] },

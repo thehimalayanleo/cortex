@@ -22,6 +22,7 @@ import { ProjectView } from "./views/ProjectView";
 import { NotesList } from "./views/NotesList";
 import { TopicsList, TopicView } from "./views/TopicsView";
 import { LabView } from "./views/LabView";
+import { GalaxyView } from "./views/GalaxyView";
 import { Resizer } from "./components/Resizer";
 
 export default function App() {
@@ -269,6 +270,9 @@ function Shell() {
       break;
     case "topic":
       view = <TopicView slug={route.slug} topics={topics.data} refresh={vaultTick} />;
+      break;
+    case "galaxy":
+      view = <GalaxyView refresh={vaultTick} />;
       break;
     case "lab":
       view = <LabView station={route.station} runId={route.run} plan={route.plan} terminal={route.terminal} studio={route.studio} traces={route.traces} pipeline={route.pipeline} pipelineId={route.pipelineId} refresh={vaultTick} />;

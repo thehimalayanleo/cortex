@@ -236,6 +236,13 @@ def gpu_status() -> dict[str, Any]:
         out["cuda"] = ok == "True"
         out["ready"] = ok == "True"
         out["message"] = f"ready: {out.get('gpu', {}).get('name', 'gpu')} · torch {ver}"
+        try:  # someone else's job on the box: say so, since big renders (Wan needs ~22 GB) will OOM behind it
+            used_mib = int(str(out.get("gpu", {}).get("memory_used", "0")).split()[0])
+            if used_mib > 2048 and not busy:
+                out["foreign_load_mib"] = used_mib
+                out["message"] += f" · another process holds {used_mib} MiB; large renders may not fit until it finishes"
+        except Exception:
+            pass
     else:
         out["ready"] = False
         out["message"] = "reachable; PyTorch is not installed yet (run setup)" if novenv else "reachable; PyTorch import failed (run setup)"

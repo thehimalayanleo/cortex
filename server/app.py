@@ -126,6 +126,14 @@ def asset_get(slug: str, name: str):
     return FileResponse(str(p), headers={"Cache-Control": "private, max-age=86400"})
 
 
+@app.get("/api/arxiv")
+def arxiv_lookup(q: str, n: int = 5):
+    try:
+        return vault.arxiv_search(q, n)
+    except Exception as e:
+        raise HTTPException(502, f"arXiv search failed: {e}")
+
+
 @app.get("/api/topics")
 def topics():
     return vault.list_topics()

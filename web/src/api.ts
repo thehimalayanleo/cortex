@@ -196,6 +196,7 @@ export const api = {
   },
 
   search: (q: string, limit = 30) => request<SearchHit[]>(`/search${qs({ q, limit })}`),
+  arxiv: (q: string, n = 5) => request<{ arxiv: string; title: string; authors: string; year: string; summary: string; in_library: boolean }[]>(`/arxiv${qs({ q, n })}`),
 
   chat: {
     channels: () => request<Channel[]>("/chat/channels"),

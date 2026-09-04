@@ -120,6 +120,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh"]}}, "required": ["cmd"]}}},
     {"type": "function", "function": {"name": "read_run", "description": "Read a run: status, the parsed metrics (loss curves etc.), the final result, and the last log lines.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "tail": {"type": "integer"}}, "required": ["id"]}}},
+    {"type": "function", "function": {"name": "search_arxiv", "description": "Search arXiv on the web by topic when the vault has nothing (or too little). Returns up to n results with arxiv id, title, authors, year, summary, and whether it is already in the library. Follow with file_paper(arxiv=<id>) to import one.",
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "n": {"type": "integer"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "offset": {"type": "integer"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "file_paper", "description": "Add a paper to the library from an arXiv id/URL (downloaded) or a local PDF path. Returns its metadata.",
@@ -276,6 +278,9 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
     if name == "append_daily":
         n = vault.append_daily(str(a["text"]))
         return {"slug": n["slug"]}, str(a["text"])[:80], f"cortex://note/{n['slug']}"
+    if name == "search_arxiv":
+        rows = vault.arxiv_search(str(a["query"]), int(a.get("n") or 5))
+        return rows, f"arxiv: {str(a['query'])[:40]} · {len(rows)} results", ""
     if name == "read_paper":
         p = vault.get_paper(str(a["id"]))
         if not p:

@@ -475,3 +475,26 @@ def counts() -> dict:
         "projects": len(list((VAULT / "projects").glob("*.md"))),
         "papers": sum(1 for d in (VAULT / "library").iterdir() if d.is_dir() and (d / "meta.json").exists()),
     }
+
+
+def arxiv_search(q: str, n: int = 5) -> list[dict]:
+    """Search arXiv (export API) by free text; returns id, title, authors, year, summary for the top n."""
+    import urllib.parse, urllib.request, xml.etree.ElementTree as ET
+    url = "https://export.arxiv.org/api/query?" + urllib.parse.urlencode({"search_query": f"all:{q}", "start": 0, "max_results": max(1, min(int(n), 15)), "sortBy": "relevance"})
+    req = urllib.request.Request(url, headers={"User-Agent": "cortex/0.1 (research library)"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        xml = r.read()
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    out = []
+    for e in ET.fromstring(xml).findall("a:entry", ns):
+        aid = (e.findtext("a:id", "", ns) or "").rsplit("/abs/", 1)[-1]
+        aid = aid.split("v")[0] if aid[:4].isdigit() else aid
+        out.append({
+            "arxiv": aid,
+            "title": " ".join((e.findtext("a:title", "", ns) or "").split()),
+            "authors": ", ".join(a.findtext("a:name", "", ns) or "" for a in e.findall("a:author", ns))[:200],
+            "year": (e.findtext("a:published", "", ns) or "")[:4],
+            "summary": " ".join((e.findtext("a:summary", "", ns) or "").split())[:500],
+            "in_library": read_meta(aid) is not None,
+        })
+    return out

@@ -132,6 +132,17 @@ export const webmcpTools: ModelContextTool[] = [
     },
   },
   {
+    name: "search_arxiv",
+    description: "Search arXiv on the web by topic when the brain has nothing: returns up to n results with arxiv id, title, authors, year, summary, and whether each is already in the library. Follow with file_paper to import one.",
+    inputSchema: { type: "object", properties: { query: { type: "string" }, n: { type: "integer" } }, required: ["query"] },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const rows = await api.arxiv(s(i.query, 200), n(i.n ?? 5, 1, 15));
+      record("search_arxiv", i, true, `${s(i.query, 40)} · ${rows.length}`);
+      return text(rows);
+    },
+  },
+  {
     name: "file_paper",
     description: "Add a paper to the library from an arXiv id or arXiv URL: the PDF is downloaded, its text indexed, and the paper opened for the user.",
     inputSchema: { type: "object", properties: { arxiv: { type: "string" } }, required: ["arxiv"] },

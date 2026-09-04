@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import agents, chat, pipeline, runs, studio, telemetry, traces, vault
+from . import galaxy, agents, chat, pipeline, runs, studio, telemetry, traces, vault
 
 app = FastAPI(title="Cortex", version="0.1")
 

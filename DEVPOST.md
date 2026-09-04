@@ -16,6 +16,15 @@ The page registers eleven tools with `document.modelContext`, the same actions a
 
 A browser agent (ChatGPT's browser, or Chrome 149+ with the WebMCP flag) can ask "which papers here are about deception", open the strongest one in the center pane, mark it reading with a takeaway, download and file a new arXiv paper, and leave a line on today's page. An agent ledger shows every call with its arguments and outcome, and each write lands in the UI as it happens.
 
+### The Training Lab (new)
+
+Reading is half of a research brain. The other half is doing. The Lab is a curriculum that lives inside Cortex, and every control in it is also a WebMCP tool:
+
+- **In the browser.** Seven stations train a small transformer with tf.js while you watch: data, pretraining, mid-training with a cooldown, SFT then DPO, an encoder trained with masked LM then contrastive pairs, k-means over the embeddings, and a paint-with-code station that runs GRPO against a rendered reward. The agent can call `lab_train` and `lab_status`, so it can say "watch the loss fall" and then read the same numbers you see.
+- **Sixteen chapters.** Data curation, pretraining, mid-training, SFT loop design, PPO/DPO/GRPO, tool use with the NVIDIA Nemotron agentic collection, embeddings, clustering, evals, red-teaming, architecture (including looped transformers), optimizers (including Muon), GPUs and the KV cache, Lean and code verification, paint with code, and the Puro-2B one-GPU pretraining recipe. Each ends with a ten-question self-test the chat can give you, and the chapters are notes in the vault, so `search_brain` and `read_note` see them.
+- **Real runs on a real GPU.** Short recipes print `METRIC {...}` lines; the app launches them on your own GPU box over SSH (my RTX 5090 over Tailscale), on Modal, or locally, and streams the log and loss curves back. The app checks the box (`gpu_status`), installs PyTorch on it if needed (`gpu_setup`), starts the run (`start_run`), and reads it back (`read_run`). The agent gets exactly those tools.
+- **A learning plan.** A kanban of cards per chapter (read, train the station, run the snippet, run the recipe, pass the self-test) with XP, levels, and a streak. The agent can move cards (`lab_plan_move`) after it quizzes you.
+
 ## How I built it
 
 The server is FastAPI over plain files, with SQLite FTS5 for search across notes, projects, and the text pulled out of every PDF. The front end is Vite, React, and TypeScript, with CodeMirror 6 for notes and KaTeX for math, so a note can hold
@@ -41,6 +50,10 @@ Hosting: the domain I own runs on ChatGPT Sites, which can't run a Python server
 ## What I learned
 
 An agent that can call `open_item` is a different collaborator from one that can only describe. Watching the paper appear in the pane while the ledger prints `search_brain`, `open_item`, `set_paper` made the WebMCP argument for me better than any spec. Also: fewer controls is a feature, and everything an agent can write should be a file you can see and revert.
+
+## What the agent can do now (18+ tools)
+
+Library: `search_brain`, `open_item`, `read_note`, `write_note`, `append_today`, `read_paper`, `key_passages`, `file_paper`, `set_paper`, `list_projects`, `update_project`. Lab: `open_lab`, `lab_train`, `lab_status`, `list_lab_chapters`, `lab_plan`, `lab_plan_move`, `gpu_status`, `gpu_setup`, `list_runs`, `start_run`, `read_run`. All registered on `document.modelContext` (with the `navigator.modelContext` fallback), and all of them move the page the person is looking at.
 
 ## What's next
 

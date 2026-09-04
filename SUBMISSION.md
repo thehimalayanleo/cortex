@@ -43,6 +43,13 @@ Everything in this repository was written during the submission period. See the 
 2:10 Drag a PDF from Finder onto the window. It files itself. The built-in chat uses the same eighteen tools on any OpenAI-compatible model.
 2:35 Close: one vault, one page, the same eighteen tools for the person and the agent. Repo link, MIT.
 
+### Lab segment for the video (about 35 seconds)
+
+1. Click Lab. Say: "The brain also teaches. This trains a small transformer in the browser." Click Train on Pretrain; the loss falls under the uniform line.
+2. In the chat: "Train the paint station for 80 steps and tell me when the blank rate hits zero." The agent calls `lab_train`, then `lab_status`; the canvases update while it answers.
+3. Switch to GPU runs. Say: "Same buttons, real GPU." The panel shows the RTX 5090 ready. In the chat: "Run pretrain_nano for 150 steps on my 5090." The agent calls `start_run`; the loss curve streams in.
+4. Open My plan: "It keeps score." Ask the chat to quiz you on chapter 2; when you answer, it moves the card and the XP ticks.
+
 ## Demo
 Live: https://cortex.aftersave.app (a public demo vault of arXiv papers). Repo: https://github.com/thehimalayanleo/cortex. Video: under 3 minutes, to add.
 

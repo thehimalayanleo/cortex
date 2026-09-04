@@ -1,6 +1,6 @@
 # Cortex: WebMCP Challenge submission notes
 
-Cortex is a researcher's second brain: papers on the left, the open PDF in the middle, chat on the right. The browser agent gets the same eleven tools the person uses. They are registered with `document.modelContext`, so ChatGPT's browser or Chrome can search the library, read a paper, file a new arXiv paper, write a note, or update a project, and the person watches each step happen in the app with a ledger of every call.
+Cortex is a researcher's second brain: papers on the left, the open PDF in the middle, chat on the right. The browser agent gets the same eighteen tools the person uses. They are registered with `document.modelContext`, so ChatGPT's browser or Chrome can search the library, read a paper, file a new arXiv paper, write a note, or update a project, and the person watches each step happen in the app with a ledger of every call.
 
 ## Use case fit
 Research is a loop: read, file, decide. Each step usually lives in a different tool, and the agent lives in a chat box next to them. Cortex keeps the vault (plain markdown and PDFs) behind one page and exposes the loop as tools. The agent does the mechanical half, finding, filing, summarizing, and recording the verdict. The person keeps the judgment half.
@@ -9,7 +9,7 @@ Research is a loop: read, file, decide. Each step usually lives in a different t
 The agent works on the same page the person is looking at. Tools that change something (`open_item`, `write_note`, `file_paper`, `update_project`) show their result in the center pane, and an agent ledger lists each call with its verb, target, and outcome. Writes are additive and easy to undo because everything is a file in a folder. Read-only tools carry `readOnlyHint`. Agent input is treated as untrusted: every argument is coerced and bounded before it touches the vault.
 
 ## WebMCP implementation
-`web/src/lib/webmcp.ts` registers eleven tools with `document.modelContext.registerTool`, falling back to `navigator.modelContext` on older Chrome builds. Registration is feature-detected, so the app works without it.
+`web/src/lib/webmcp.ts` registers eighteen tools with `document.modelContext.registerTool`, falling back to `navigator.modelContext` on older Chrome builds. Registration is feature-detected, so the app works without it.
 
 | tool | what it does |
 |---|---|
@@ -18,6 +18,13 @@ The agent works on the same page the person is looking at. Tools that change som
 | `read_note` / `write_note` / `append_today` | read, create, or append markdown (LaTeX aware) |
 | `read_paper` / `file_paper` / `set_paper` | read a paper, ingest one from arXiv (download and index), set status, rating, takeaway |
 | `key_passages` | the theorems, results, and claims of a paper, quoted verbatim with page numbers |
+| `open_lab` | open the Training Lab at a station (data, pretrain, midtrain, posttrain, encoder, cluster, paint) |
+| `lab_train` | train the in-browser model at a station for N steps; the person watches the loss curve move |
+| `lab_status` | read the live state of the browser lab: step, loss, samples, purity, reward |
+| `list_lab_chapters` | the sixteen teaching chapters, each a note the agent can open and quote |
+| `list_runs` | training runs launched on a GPU (this machine, the user's box over SSH, or Modal) |
+| `start_run` | launch a recipe on a GPU and open it so the person sees the metrics stream in |
+| `read_run` | status, parsed metrics, result, and log tail of a run |
 | `list_projects` / `update_project` | one-line verdicts and next actions |
 
 Results come back as MCP content blocks. Failures return `{error}` text and never throw into the page.
@@ -33,8 +40,8 @@ Everything in this repository was written during the submission period. See the 
 0:25 The app. Papers on the left, a PDF open in the middle with its status, rating, and one-line takeaway, chat on the right.
 0:55 WebMCP. Open the same page in ChatGPT's browser. Ask: "Which papers here are about deception? Open the strongest one." The paper opens in the center pane and the ledger shows `search_brain` and `open_item`.
 1:30 Ask: "Set it to reading with the takeaway 'probes beat output monitoring', then file arXiv 2511.13653 and add a line to today's page." Show `set_paper`, `file_paper` (the PDF downloads and opens), `append_today`, and today's page updating.
-2:10 Drag a PDF from Finder onto the window. It files itself. The built-in chat uses the same eleven tools on any OpenAI-compatible model.
-2:35 Close: one vault, one page, the same eleven tools for the person and the agent. Repo link, MIT.
+2:10 Drag a PDF from Finder onto the window. It files itself. The built-in chat uses the same eighteen tools on any OpenAI-compatible model.
+2:35 Close: one vault, one page, the same eighteen tools for the person and the agent. Repo link, MIT.
 
 ## Demo
 Live: https://cortex.aftersave.app (a public demo vault of arXiv papers). Repo: https://github.com/thehimalayanleo/cortex. Video: under 3 minutes, to add.

@@ -8,6 +8,7 @@
 import { api } from "../api";
 import { emitCommand } from "./events";
 import { navigate } from "./router";
+import { labMessage } from "../views/LabView";
 import type { NoteKind } from "../types";
 
 type ToolResult = { content: { type: "text"; text: string }[] };
@@ -175,6 +176,140 @@ export const webmcpTools: ModelContextTool[] = [
       const p = await api.projects.update(s(i.slug, 200), { frontmatter: fm });
       changed(); navigate({ kind: "project", slug: p.slug }); record("update_project", i, true, `${String(p.frontmatter.title)} · ${Object.keys(fm).join(", ")}`);
       return text(p.frontmatter);
+    },
+  },
+  // ---- the Training Lab: the agent gets the same buttons the person has (train in the browser, run on a GPU)
+  {
+    name: "open_lab",
+    description: "Open the Training Lab and show a station: overview|data|pretrain|midtrain|posttrain|encoder|cluster|paint. The lab trains a tiny transformer in the browser so the user can watch each stage of an LLM pipeline.",
+    inputSchema: { type: "object", properties: { station: { type: "string" } } },
+    execute: async (i) => {
+      const st = s(i.station || "overview", 20);
+      navigate({ kind: "lab", station: st });
+      record("open_lab", i, true, st);
+      return text({ ok: true, station: st });
+    },
+  },
+  {
+    name: "lab_train",
+    description: "Train in the user's browser at a lab station and watch it live: station pretrain|midtrain|sft|dpo|encoder|contrastive|cluster|paint, steps (default the station's setting). Returns immediately; call lab_status to read the loss, samples, and metrics as it runs.",
+    inputSchema: { type: "object", properties: { station: { type: "string" }, steps: { type: "integer" } }, required: ["station"] },
+    execute: async (i) => {
+      const st = s(i.station, 20);
+      const target = ({ sft: "posttrain", dpo: "posttrain", contrastive: "encoder" } as Record<string, string>)[st] ?? st;
+      navigate({ kind: "lab", station: target });
+      await new Promise((r) => setTimeout(r, 700)); // let the frame mount
+      const r = await labMessage({ type: "lab:run", station: st, steps: i.steps ? n(i.steps, 1, 5000) : undefined }, 6000);
+      record("lab_train", i, r.ok !== false, `${st} · ${String(r.steps ?? "")} steps`);
+      return text(r);
+    },
+  },
+  {
+    name: "lab_status",
+    description: "Read the live state of the in-browser lab: backend, current station, and per-station step, loss, samples, purity.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const r = await labMessage({ type: "lab:status" });
+      record("lab_status", i, true, "ok");
+      return text(r.status);
+    },
+  },
+  {
+    name: "list_lab_chapters",
+    description: "List the lab's teaching chapters (15: data, pretraining, mid-training, SFT, RL, tool use, embeddings, clustering, evals, red-teaming, architecture, optimizers, GPU and KV cache, Lean, paint with code). Open one with open_item kind note and its slug.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const ch = await api.lab.chapters();
+      record("list_lab_chapters", i, true, `${ch.length}`);
+      return text(ch);
+    },
+  },
+  {
+    name: "gpu_status",
+    description: "Check the user's GPU box (the home RTX 5090 over Tailscale): reachable, GPU name and memory, whether PyTorch is ready, whether a run is in progress. Call before start_run with executor ssh.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      navigate({ kind: "lab", run: "" });
+      const g = await api.lab.gpu();
+      record("gpu_status", i, g.reachable, g.message ?? "");
+      return text(g);
+    },
+  },
+  {
+    name: "gpu_setup",
+    description: "Prepare the user's GPU box for runs: installs uv, a Python 3.11 venv, CUDA 12.8 PyTorch and the training libraries over SSH. Idempotent; minutes the first time. The person sees the log stream in the Lab.",
+    inputSchema: { type: "object", properties: {} },
+    execute: async (i) => {
+      navigate({ kind: "lab", run: "" });
+      const lines: string[] = [];
+      let final: unknown = null;
+      await api.lab.gpuSetup((ev) => {
+        if (ev.type === "log") lines.push(...ev.lines);
+        else final = ev;
+      });
+      record("gpu_setup", i, true, "done");
+      return text({ log: lines.slice(-30), final });
+    },
+  },
+  {
+    name: "lab_plan",
+    description: "The user's learning plan: a kanban of cards (read a chapter, train the station, run the snippet, run the recipe on the GPU, pass the self-test) in columns todo|doing|done. Opens the board. Use it to suggest what to do next.",
+    inputSchema: { type: "object", properties: { col: { type: "string" } } },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      navigate({ kind: "lab", plan: true });
+      const p = await api.lab.plan();
+      const col = s(i.col || "all", 8);
+      record("lab_plan", i, true, `${p.done}/${p.total} done`);
+      return text({ done: p.done, total: p.total, cards: p.cards.filter((c) => col === "all" || c.col === col) });
+    },
+  },
+  {
+    name: "lab_plan_move",
+    description: "Move a learning card to todo|doing|done with an optional comment (for example after the user passes a quiz you gave them, or a run finishes). The board updates in front of the user.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, col: { type: "string" }, comment: { type: "string" } }, required: ["id", "col"] },
+    execute: async (i) => {
+      const p = await api.lab.planMove(s(i.id, 40), s(i.col, 8) as "todo" | "doing" | "done", i.comment ? s(i.comment, 500) : undefined);
+      changed(); navigate({ kind: "lab", plan: true }); record("lab_plan_move", i, true, `${s(i.id, 40)} → ${s(i.col, 8)}`);
+      return text({ done: p.done, total: p.total });
+    },
+  },
+  {
+    name: "list_runs",
+    description: "List GPU training runs launched from the lab (recipe, executor, status, last metric).",
+    inputSchema: { type: "object", properties: { limit: { type: "integer" } } },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const rs = await api.lab.runs(n(i.limit ?? 20, 1, 100));
+      record("list_runs", i, true, `${rs.length}`);
+      return text(rs.map((r) => ({ id: r.id, recipe: r.recipe, args: r.args, executor: r.executor, status: r.status, last: r.last })));
+    },
+  },
+  {
+    name: "start_run",
+    description: "Launch a lab recipe on a GPU (executor ssh = the user's box, modal = rented, local = this machine) and open it so the user watches the metrics. recipe: pretrain_nano|midtrain|sft_lora|dpo|grpo_tool|embed_contrastive|eval_suite|redteam_suite|kernel_bench|optim_bench|paint_grpo|lean_eval; args is the script's command line, e.g. '--smoke --steps 200'. Only when the user asks to train, run, or benchmark.",
+    inputSchema: { type: "object", properties: { recipe: { type: "string" }, args: { type: "string" }, executor: { type: "string" } }, required: ["recipe"] },
+    execute: async (i) => {
+      const r = await api.lab.start({ recipe: s(i.recipe, 60), args: s(i.args || "", 500), executor: s(i.executor || "local", 10) });
+      changed(); navigate({ kind: "lab", run: r.id }); record("start_run", i, true, `${r.recipe} on ${r.executor} · ${r.id}`);
+      return text(r);
+    },
+  },
+  {
+    name: "read_run",
+    description: "Read a run: status, parsed metrics (thinned), final result, and the last log lines.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, tail: { type: "integer" } }, required: ["id"] },
+    annotations: { readOnlyHint: true },
+    execute: async (i) => {
+      const r = await api.lab.run(s(i.id, 80), n(i.tail ?? 60, 1, 1000));
+      const m = r.metrics;
+      const thin = m.length <= 60 ? m : [...Array.from({ length: 60 }, (_, k) => m[Math.floor((k * m.length) / 60)]), m[m.length - 1]];
+      navigate({ kind: "lab", run: r.id });
+      record("read_run", i, true, `${r.id} · ${r.status}`);
+      return text({ id: r.id, recipe: r.recipe, args: r.args, executor: r.executor, status: r.status, result: r.result, metrics: thin, log: r.log });
     },
   },
 ];

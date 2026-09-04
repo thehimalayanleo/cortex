@@ -10,7 +10,8 @@ export type Route =
   | { kind: "project"; slug: string }
   | { kind: "notes"; noteKind?: NoteKind }
   | { kind: "topics" }
-  | { kind: "topic"; slug: string };
+  | { kind: "topic"; slug: string }
+  | { kind: "lab"; station?: string; run?: string; plan?: boolean };
 
 export function routeToHash(r: Route): string {
   switch (r.kind) {
@@ -30,6 +31,8 @@ export function routeToHash(r: Route): string {
       return "#/topics";
     case "topic":
       return `#/topic/${encodeURIComponent(r.slug)}`;
+    case "lab":
+      return r.plan ? "#/lab/plan" : r.run ? `#/lab/run/${encodeURIComponent(r.run)}` : r.station ? `#/lab/${encodeURIComponent(r.station)}` : "#/lab";
   }
 }
 
@@ -55,6 +58,11 @@ export function parseHash(hash: string): Route {
       return { kind: "topics" };
     case "topic":
       return rest ? { kind: "topic", slug: rest } : { kind: "topics" };
+    case "lab":
+      if (segs[1] === "run" && segs[2]) return { kind: "lab", run: segs[2] };
+      if (segs[1] === "run") return { kind: "lab", run: "" };
+      if (segs[1] === "plan") return { kind: "lab", plan: true };
+      return { kind: "lab", station: segs[1] || undefined };
     default:
       // Old #/library and #/projects links land on the home view (the rail is the library now).
       return { kind: "home" };
@@ -63,11 +71,17 @@ export function parseHash(hash: string): Route {
 
 /** cortex://note/<slug>, cortex://paper/<id>, cortex://project/<slug> -> Route */
 export function parseCortexLink(href: string): Route | null {
-  const m = /^cortex:\/\/(note|paper|project|topic|daily)(?:\/(.*))?$/i.exec(href.trim());
+  const m = /^cortex:\/\/(note|paper|project|topic|daily|lab)(?:\/(.*))?$/i.exec(href.trim());
   if (!m) return null;
   const type = m[1].toLowerCase();
   const id = m[2] ? decodeURIComponent(m[2].replace(/\/+$/, "")) : "";
   if (type === "daily") return { kind: "daily" };
+  if (type === "lab") {
+    const mm = /^run\/(.+)$/.exec(id);
+    if (id === "plan") return { kind: "lab", plan: true };
+    if (id === "runs") return { kind: "lab", run: "" };
+    return mm ? { kind: "lab", run: mm[1] } : { kind: "lab", station: id || undefined };
+  }
   if (!id) return null;
   if (type === "note") return { kind: "note", slug: id };
   if (type === "paper") return { kind: "paper", id };

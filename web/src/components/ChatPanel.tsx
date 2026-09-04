@@ -19,6 +19,7 @@ function chatContext(space: string): { kind?: string; id?: string; space: string
   if (r.kind === "note") return { kind: "note", id: r.slug, space };
   if (r.kind === "project") return { kind: "project", id: r.slug, space };
   if (r.kind === "daily") return { kind: "daily", id: new Date().toISOString().slice(0, 10), space };
+  if (r.kind === "lab") return { kind: "lab", id: r.run ? `run ${r.run}` : r.station ?? "", space };
   return { space };
 }
 const FALLBACK_MODELS: ModelInfo[] = [

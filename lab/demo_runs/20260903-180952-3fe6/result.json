@@ -1,0 +1,9 @@
+{
+  "train_loss": 1.979453682899475,
+  "val_loss": 1.5379390716552734,
+  "params": 104576,
+  "flops_per_token": 702336,
+  "loop": 1,
+  "steps": 60,
+  "checkpoint": "out/pretrain_nano/ckpt.pt"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "20260903-180952-3fe6",
+  "recipe": "pretrain_nano",
+  "args": "--smoke --steps 60",
+  "executor": "local",
+  "status": "done",
+  "started": "2026-09-03T18:09:52",
+  "ended": "2026-09-03T18:10:02",
+  "exit": 0
+}

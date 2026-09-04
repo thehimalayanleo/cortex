@@ -29,6 +29,8 @@ cat > "$PLIST" <<EOF
     <key>PATH</key><string>$(dirname "$UV"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>CORTEX_VAULT</key><string>${CORTEX_VAULT:-$HOME/Cortex}</string>
     <key>CORTEX_PORT</key><string>${CORTEX_PORT:-8788}</string>
+    <key>CORTEX_SSH_HOST</key><string>${CORTEX_SSH_HOST-ajinkya-5090}</string>
+    <key>CORTEX_SSH_PYTHON</key><string>${CORTEX_SSH_PYTHON:-\$HOME/lab-venv/bin/python}</string>
   </dict>
   <key>WorkingDirectory</key><string>$ROOT</string>
   <key>RunAtLoad</key><true/>

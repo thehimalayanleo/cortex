@@ -3,3 +3,5 @@ web/dist/
 __pycache__/
 *.pyc
 .venv/
+out/
+__pycache__/

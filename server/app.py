@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import agents, chat, vault
+from . import agents, chat, runs, vault
 
 app = FastAPI(title="Cortex", version="0.1")
 
@@ -64,6 +64,13 @@ def _startup() -> None:
     INBOX.mkdir(exist_ok=True)
     (vault.VAULT / "assets").mkdir(exist_ok=True)
     threading.Thread(target=_watch_inbox, args=(INBOX,), daemon=True).start()
+    try:
+        n = runs.sync_chapters_into_vault()
+        if n:
+            vault.rebuild_index()
+            print(f"lab: synced {n} chapter(s) into the vault")
+    except Exception as e:
+        print("lab: chapter sync failed", e)
 
 
 def _sse(gen: Iterator[dict]) -> StreamingResponse:
@@ -387,6 +394,135 @@ def agents_run(a: AgentIn):
                     code = -1
         yield {"type": "done", "code": code}
     return _sse(gen())
+
+
+# ---------------------------------------------------------------- training lab: runs on a GPU (this machine, the 5090 over SSH, or Modal)
+
+class RunIn(BaseModel):
+    recipe: str
+    args: str | None = ""
+    executor: str | None = "local"
+
+
+@app.get("/api/lab/executors")
+def lab_executors():
+    return runs.executors()
+
+
+@app.get("/api/lab/gpu")
+def lab_gpu():
+    return runs.gpu_status()
+
+
+@app.post("/api/lab/gpu/setup")
+def lab_gpu_setup():
+    """SSE: bootstrap the GPU box (uv, python, CUDA torch, training libs). Safe to re-run."""
+    return _sse(runs.gpu_setup_stream())
+
+
+class PlanMove(BaseModel):
+    id: str
+    col: str
+    comment: str | None = None
+
+
+@app.get("/api/lab/plan")
+def lab_plan():
+    return runs.plan()
+
+
+@app.post("/api/lab/plan/move")
+def lab_plan_move(m: PlanMove):
+    try:
+        return runs.plan_move(m.id, m.col, m.comment)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/lab/recipes")
+def lab_recipes():
+    return runs.recipes()
+
+
+@app.get("/api/lab/chapters")
+def lab_chapters():
+    return runs.chapters()
+
+
+@app.get("/api/lab/runs")
+def lab_runs(limit: int = 50):
+    return runs.list_runs(limit)
+
+
+@app.post("/api/lab/runs")
+def lab_run_start(r: RunIn):
+    try:
+        return runs.start(r.recipe, r.args or "", r.executor or "local")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/lab/runs/{rid}")
+def lab_run_get(rid: str, tail: int = 200):
+    r = runs.read_run(rid, tail)
+    if not r:
+        raise HTTPException(404, "no such run")
+    return r
+
+
+@app.post("/api/lab/runs/{rid}/stop")
+def lab_run_stop(rid: str):
+    return {"ok": runs.stop(rid)}
+
+
+@app.delete("/api/lab/runs/{rid}")
+def lab_run_delete(rid: str):
+    if not runs.delete_run(rid):
+        raise HTTPException(404, "no such run")
+    return {"ok": True}
+
+
+@app.get("/api/lab/runs/{rid}/events")
+def lab_run_events(rid: str):
+    """SSE: log lines and metrics as they arrive, then a final status."""
+    import time as _t
+
+    def gen():
+        seen_log = 0
+        seen_m = 0
+        while True:
+            r = runs.read_run(rid, tail=100000)
+            if not r:
+                yield {"type": "error", "message": "no such run"}
+                return
+            log = r["log"]
+            if len(log) > seen_log:
+                yield {"type": "log", "lines": log[seen_log:]}
+                seen_log = len(log)
+            m = r["metrics"]
+            if len(m) > seen_m:
+                yield {"type": "metrics", "rows": m[seen_m:]}
+                seen_m = len(m)
+            if r["status"] in ("done", "failed", "stopped"):
+                yield {"type": "status", "status": r["status"], "result": r.get("result"), "exit": r.get("exit")}
+                return
+            _t.sleep(1.0)
+
+    return _sse(gen())
+
+
+# ---------------------------------------------------------------- the training lab (static page + chapters)
+
+LAB = Path(__file__).resolve().parent.parent / "lab"
+
+
+@app.get("/lab")
+@app.get("/lab/")
+def lab_page():
+    p = LAB / "index.html"
+    if not p.exists():
+        raise HTTPException(404, "lab not built")
+    return FileResponse(str(p), media_type="text/html")
 
 
 # ---------------------------------------------------------------- static frontend

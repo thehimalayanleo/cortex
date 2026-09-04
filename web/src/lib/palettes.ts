@@ -33,6 +33,14 @@ export const PALETTES: Palette[] = [
   { id: "solarized-light", name: "Solarized Light", dark: false, bg: "#fdf6e3", surface: "#fffbf0", surface2: "#eee8d5", surface3: "#e4dcc4", border: "#d9d2bc", text: "#073642", text2: "#586e75", text3: "#93a1a1", accent: "#268bd2" },
   { id: "github-light", name: "GitHub Light", dark: false, bg: "#f6f8fa", surface: "#ffffff", surface2: "#eaeef2", surface3: "#d0d7de", border: "#d0d7de", text: "#1f2328", text2: "#59636e", text3: "#8c959f", accent: "#0969da" },
   { id: "ayu-light", name: "Ayu Light", dark: false, bg: "#fafafa", surface: "#ffffff", surface2: "#f0f0f0", surface3: "#e6e6e6", border: "#d9d9d9", text: "#5c6166", text2: "#787b80", text3: "#a0a6ac", accent: "#ff9940" },
+  // House palettes
+  { id: "matcha", name: "Matcha", dark: false, bg: "#f3f1e6", surface: "#faf8ef", surface2: "#e9e6d6", surface3: "#dcd8c3", border: "#d3cfb8", text: "#2b3325", text2: "#5a6650", text3: "#8d977f", accent: "#5f8f3e" },
+  { id: "y2k-lightning", name: "Y2K Lightning", dark: true, bg: "#0b0c1a", surface: "#11132a", surface2: "#1a1d3a", surface3: "#252a4d", border: "#2e3460", text: "#e8ecff", text2: "#aab3e6", text3: "#6c74a8", accent: "#7df9ff" },
+  { id: "ultraviolet", name: "Ultraviolet", dark: true, bg: "#120a1f", surface: "#1a1030", surface2: "#241742", surface3: "#2f1f55", border: "#3a2a66", text: "#efe6ff", text2: "#c3b3e6", text3: "#8574ad", accent: "#c77dff" },
+  { id: "tangerine", name: "Tangerine Dream", dark: true, bg: "#1c1410", surface: "#241a14", surface2: "#31241c", surface3: "#3f2f24", border: "#4a382b", text: "#fbeee2", text2: "#d7bfa9", text3: "#9c8470", accent: "#ff8c42" },
+  { id: "sakura", name: "Sakura", dark: false, bg: "#fbf3f5", surface: "#fffafb", surface2: "#f4e6ea", surface3: "#ead6dc", border: "#e3ccd3", text: "#3a2830", text2: "#6f5560", text3: "#a58d97", accent: "#d64f7a" },
+  { id: "chrome", name: "Chrome", dark: true, bg: "#1b1d20", surface: "#212428", surface2: "#2b2f34", surface3: "#363b41", border: "#42484f", text: "#eef1f4", text2: "#b8c0c8", text3: "#7f8891", accent: "#c8d3dc" },
+  { id: "paper", name: "Paper", dark: false, bg: "#f7f4ee", surface: "#fffdf8", surface2: "#efeae0", surface3: "#e3ddcf", border: "#d9d2c2", text: "#2a2620", text2: "#5f584d", text3: "#948b7c", accent: "#b4552d" },
 ];
 
 const KEY = "cortex.palette";
@@ -65,10 +73,10 @@ export function clearPalette(persist = true) {
 }
 
 /** Apply a palette by id. Returns the palette (or the default when unknown). */
-export function applyPalette(id: string): Palette {
+export function applyPalette(id: string, persist = true): Palette {
   const p = PALETTES.find((x) => x.id === id) ?? PALETTES[0];
   const root = document.documentElement;
-  if (p.id === "verdigris") { clearPalette(); return p; }
+  if (p.id === "verdigris") { clearPalette(persist); return p; }
   const s = root.style;
   s.setProperty("--bg", p.bg); s.setProperty("--surface", p.surface); s.setProperty("--surface-2", p.surface2); s.setProperty("--surface-3", p.surface3);
   s.setProperty("--border", p.border); s.setProperty("--border-strong", mix(p.border, p.text, 0.25));
@@ -83,8 +91,17 @@ export function applyPalette(id: string): Palette {
   s.setProperty("--code-bg", p.surface2);
   root.dataset.palette = p.id;
   root.dataset.theme = p.dark ? "dark" : "light"; // pin the scheme the palette was designed for
-  try { localStorage.setItem(KEY, p.id); localStorage.setItem("cortex.theme", p.dark ? "dark" : "light"); } catch { /* ignore */ }
+  if (persist) { try { localStorage.setItem(KEY, p.id); localStorage.setItem("cortex.theme", p.dark ? "dark" : "light"); } catch { /* ignore */ } }
   return p;
+}
+
+/** Try a palette on without saving it (the Cmd+K list previews as you arrow through). */
+export function previewPalette(id: string) { applyPalette(id, false); }
+/** Put the saved palette back after a preview. */
+export function endPreview() {
+  const id = readPaletteId();
+  if (id === "verdigris") clearPalette(false); else applyPalette(id, false);
+  try { const t = localStorage.getItem("cortex.theme"); if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; } catch { /* ignore */ }
 }
 
 /** Re-apply the saved palette at boot (call before first paint). */

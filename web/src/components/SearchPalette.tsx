@@ -5,7 +5,7 @@ import type { Project, SearchHit, SearchType } from "../types";
 import { navigate } from "../lib/router";
 import type { Route } from "../lib/router";
 import { useDebouncedValue } from "../lib/hooks";
-import { PALETTES, applyPalette, readPaletteId } from "../lib/palettes";
+import { PALETTES, applyPalette, previewPalette, endPreview, readPaletteId } from "../lib/palettes";
 
 interface Props {
   open: boolean;
@@ -134,6 +134,8 @@ export function SearchPalette({ open, onClose, onNewNote, onNewSpace, projects, 
           },
         },
         { key: "topics", title: "Topics", group: "Go to", run: go({ kind: "topics" }) },
+        { key: "lab", title: "Training Lab", group: "Go to", hint: "train in the browser or on a GPU", run: go({ kind: "lab" }) },
+        { key: "lab-runs", title: "Lab: GPU runs", group: "Go to", hint: "5090 over SSH, Modal, or local", run: go({ kind: "lab", run: "" }) },
         ...spaceItems,
         ...themeItems,
       ];
@@ -169,6 +171,17 @@ export function SearchPalette({ open, onClose, onNewNote, onNewSpace, projects, 
     const el = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
     el?.scrollIntoView({ block: "nearest" });
   }, [index]);
+
+  // Live theme preview: arrowing over a "Theme: …" row tries it on; leaving the rows (or closing) puts the saved one back.
+  useEffect(() => {
+    if (!open) return;
+    const it = items[index];
+    if (it && it.key.startsWith("theme:")) previewPalette(it.key.slice(6));
+    else endPreview();
+  }, [open, index, items]);
+  useEffect(() => {
+    if (!open) endPreview();
+  }, [open]);
 
   if (!open) return null;
 

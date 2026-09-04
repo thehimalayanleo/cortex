@@ -76,6 +76,22 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "kind": {"type": "string"}, "body": {"type": "string"}, "topics": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "body"]}}},
     {"type": "function", "function": {"name": "append_daily", "description": "Append a line or paragraph to today's daily page.",
         "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}},
+    {"type": "function", "function": {"name": "list_lab_chapters", "description": "List the Training Lab chapters (the curriculum: data, pretraining, mid-training, SFT, RL, tool use, embeddings, clustering, evals, red-teaming, architecture, optimizers, GPU/KV cache, Lean, paint-with-code). Each is a note with slug lab-NN-name; read one with read_note.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "gpu_status", "description": "Check the user's GPU box (the home RTX 5090 over Tailscale): reachable, GPU name and memory, whether PyTorch is ready, whether a run is in progress. Call before start_run on the ssh executor.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "gpu_setup", "description": "Prepare the GPU box for runs (installs uv, a Python 3.11 venv, CUDA 12.8 PyTorch, and the training libraries over SSH; idempotent; takes minutes the first time). Returns the last log lines and the final status.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "lab_plan", "description": "The user's learning plan: a kanban of cards (read a chapter, train the station, run the snippet, run the recipe on the GPU, pass the self-test) in columns todo|doing|done, with counts. Use it to suggest what to do next and to track progress.",
+        "parameters": {"type": "object", "properties": {"col": {"type": "string", "enum": ["todo", "doing", "done", "all"]}}}}},
+    {"type": "function", "function": {"name": "lab_plan_move", "description": "Move a learning card to a column (todo|doing|done) with an optional comment, for example after the user passes a quiz or finishes a run.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "col": {"type": "string"}, "comment": {"type": "string"}}, "required": ["id", "col"]}}},
+    {"type": "function", "function": {"name": "list_runs", "description": "List training runs launched from the lab (recipe, executor, status, last metric).",
+        "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}}},
+    {"type": "function", "function": {"name": "start_run", "description": "Launch a lab recipe (a training or evaluation script under lab/recipes, for example pretrain_nano, sft_lora, dpo, grpo_tool, embed_contrastive, eval_suite, redteam_suite, kernel_bench, optim_bench, paint_grpo, lean_eval) on an executor: local (this machine), ssh (the user's GPU box), or modal (rented GPU). args is the script's command line, e.g. '--smoke --steps 200'. Only when the user asks to train, run, or benchmark something.",
+        "parameters": {"type": "object", "properties": {"recipe": {"type": "string"}, "args": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh", "modal"]}}, "required": ["recipe"]}}},
+    {"type": "function", "function": {"name": "read_run", "description": "Read a run: status, the parsed metrics (loss curves etc.), the final result, and the last log lines.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "tail": {"type": "integer"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "offset": {"type": "integer"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "file_paper", "description": "Add a paper to the library from an arXiv id/URL (downloaded) or a local PDF path. Returns its metadata.",
@@ -206,13 +222,58 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         if not p:
             raise ValueError(f"no project {a['slug']}")
         return p["frontmatter"], f"{p['frontmatter'].get('title','')} · {', '.join(patch)}", f"cortex://project/{a['slug']}"
+    if name == "list_lab_chapters":
+        from . import runs
+        ch = runs.chapters()
+        return ch, f"lab · {len(ch)} chapters", "cortex://lab"
+    if name == "gpu_status":
+        from . import runs
+        g = runs.gpu_status()
+        return g, g.get("message", ""), "cortex://lab/runs"
+    if name == "gpu_setup":
+        from . import runs
+        lines = []
+        final = None
+        for ev in runs.gpu_setup_stream():
+            if ev.get("type") == "log":
+                lines.extend(ev["lines"])
+            elif ev.get("type") in ("status", "error"):
+                final = ev
+        return {"log": lines[-40:], "final": final}, f"gpu setup · {(final or {}).get('status', 'error')}", "cortex://lab/runs"
+    if name == "lab_plan":
+        from . import runs
+        pl = runs.plan()
+        col = a.get("col") or "all"
+        cards = [c for c in pl["cards"] if col == "all" or c["col"] == col]
+        return {"done": pl["done"], "total": pl["total"], "cards": cards}, f"plan · {pl['done']}/{pl['total']} done", "cortex://lab/plan"
+    if name == "lab_plan_move":
+        from . import runs
+        pl = runs.plan_move(str(a["id"]), str(a["col"]), a.get("comment"))
+        return {"done": pl["done"], "total": pl["total"]}, f"{a['id']} → {a['col']}", "cortex://lab/plan"
+    if name == "list_runs":
+        from . import runs
+        rs = runs.list_runs(int(a.get("limit") or 20))
+        rows = [{k: r.get(k) for k in ("id", "recipe", "args", "executor", "status", "started", "ended", "last")} for r in rs]
+        return rows, f"runs · {len(rows)}", "cortex://lab"
+    if name == "start_run":
+        from . import runs
+        m = runs.start(str(a["recipe"]), str(a.get("args") or ""), str(a.get("executor") or "local"))
+        return m, f"{m['recipe']} on {m['executor']} · {m['id']}", f"cortex://lab/run/{m['id']}"
+    if name == "read_run":
+        from . import runs
+        r = runs.read_run(str(a["id"]), int(a.get("tail") or 60))
+        if not r:
+            raise ValueError(f"no run {a['id']}")
+        m = r["metrics"]
+        thin = m if len(m) <= 60 else [m[int(i * len(m) / 60)] for i in range(60)] + [m[-1]]
+        return {**{k: r[k] for k in ("id", "recipe", "args", "executor", "status", "started", "ended", "exit")}, "result": r.get("result"), "metrics": thin, "log": r["log"]}, f"run {r['id']} · {r['status']}", f"cortex://lab/run/{r['id']}"
     if name == "run_agent":
         out = agents.run_capture(str(a["agent"]), str(a["task"]))
         return {"output": out}, f"{a['agent']}: {str(a['task'])[:70]}", ""
     raise ValueError(f"unknown tool {name}")
 
 
-WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent"}
+WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move"}
 
 
 def system_prompt(channel: str) -> str:
@@ -247,6 +308,12 @@ def _context_line(ctx: dict | None) -> str:
         return f"\nOPEN IN THE APP RIGHT NOW: note \"{title or cid}\" (slug {cid}). 'This note' means it; call read_note(\"{cid}\") for the body. Link: cortex://note/{cid}"
     if kind == "project" and cid:
         return f"\nOPEN IN THE APP RIGHT NOW: project \"{title or cid}\" (slug {cid}). 'This project' means it. Link: cortex://project/{cid}"
+    if kind == "lab":
+        where = f"station '{cid}'" if cid else "the overview"
+        return (f"\nOPEN IN THE APP RIGHT NOW: the Training Lab, {where}. The lab has in-browser stations (data, pretrain, midtrain, posttrain, encoder, cluster, paint) "
+                "that train a tiny transformer with tf.js, 15 teaching chapters (list_lab_chapters, then read_note on a slug like lab-05-preference-and-rl), "
+                "and GPU runs (list_runs, start_run, read_run). Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
+                "Link: cortex://lab")
     return ""
 
 

@@ -1,0 +1,946 @@
+<title>Training Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js"></script>
+<style>
+:root{
+  --bg:#f3f5f3;--panel:#ffffff;--panel-2:#e9eeeb;--ink:#17201c;--muted:#5f6c66;--faint:#97a39d;--line:#d8dfdb;
+  --accent:#2f8f7b;--accent-ink:#fff;--accent-soft:#dcefe8;--warn:#b8741e;--warn-soft:#f6e9d5;--bad:#b4433a;--bad-soft:#f5dedc;
+  --c1:#2f8f7b;--c2:#c2632b;--c3:#3b6fb6;--c4:#8a5fb0;
+  --display:"Bricolage Grotesque","IBM Plex Sans",system-ui,sans-serif;--body:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1311;--panel:#151b18;--panel-2:#1b2320;--ink:#e4eae6;--muted:#8c9892;--faint:#5e6a64;--line:#243029;
+  --accent:#4db39d;--accent-ink:#0b1411;--accent-soft:#183129;--warn:#d9a15a;--warn-soft:#2e2417;--bad:#e07a72;--bad-soft:#2f1b19;
+  --c1:#4db39d;--c2:#e2854a;--c3:#6f9ddc;--c4:#b48bd6;
+}}
+:root[data-theme="dark"]{
+  --bg:#0e1311;--panel:#151b18;--panel-2:#1b2320;--ink:#e4eae6;--muted:#8c9892;--faint:#5e6a64;--line:#243029;
+  --accent:#4db39d;--accent-ink:#0b1411;--accent-soft:#183129;--warn:#d9a15a;--warn-soft:#2e2417;--bad:#e07a72;--bad-soft:#2f1b19;
+  --c1:#4db39d;--c2:#e2854a;--c3:#6f9ddc;--c4:#b48bd6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--body);-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+button{font:inherit;color:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+button:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select,textarea{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+code,pre{font-family:var(--mono);font-size:12.5px}
+pre{background:var(--panel-2);padding:12px 14px;border-radius:10px;overflow-x:auto;line-height:1.5;margin:0}
+.lab{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:100vh}
+@media (max-width:820px){.lab{grid-template-columns:1fr}.nav{position:static;border-right:0;border-bottom:1px solid var(--line)}}
+.nav{border-right:1px solid var(--line);background:var(--panel);padding:20px 16px;position:sticky;top:0;height:100vh;overflow:auto}
+.nav h1{margin:0 0 2px;font:700 22px/1 var(--display);letter-spacing:-.02em}
+.nav .sub{font:500 11px/1.3 var(--mono);color:var(--faint);letter-spacing:.06em;text-transform:uppercase;margin-bottom:18px}
+.nav a.back{display:inline-block;margin-bottom:8px;font:500 12px var(--mono);color:var(--faint);text-decoration:none}.nav a.back:hover{color:var(--ink)}
+body.embed .nav a.back{display:none}
+.nav a.st{display:block;padding:8px 10px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:14px}
+.nav a.st b{display:block;font:500 10.5px/1 var(--mono);color:var(--faint);letter-spacing:.06em;margin-bottom:3px}
+.nav a.st:hover{background:var(--panel-2);color:var(--ink)}
+.nav a.st.on{background:var(--accent-soft);color:var(--ink)}
+.nav .foot{margin-top:18px;font:400 11.5px/1.5 var(--mono);color:var(--faint)}
+.nav .foot .pill{display:inline-block;padding:3px 8px;border:1px solid var(--line);border-radius:999px;margin-top:6px}
+main{padding:28px 34px 80px;max-width:1180px}
+section.station{display:none}
+section.station.on{display:block}
+.eyebrow{font:500 11px/1 var(--mono);color:var(--accent);letter-spacing:.08em;text-transform:uppercase}
+h2{font:700 30px/1.15 var(--display);letter-spacing:-.02em;margin:6px 0 10px;text-wrap:balance}
+.lede{max-width:66ch;color:var(--muted);margin:0 0 18px;font-size:15.5px}
+.grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:18px;align-items:start}
+@media (max-width:1000px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.card h3{margin:0 0 10px;font:600 13px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.card p{margin:8px 0;max-width:66ch}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px}
+.controls label{font:500 12px/1 var(--mono);color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.stat{display:inline-flex;gap:6px;align-items:baseline;font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-right:14px}
+.stat b{color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
+canvas.chart{width:100%;height:190px;display:block;background:var(--panel-2);border-radius:10px}
+canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);border-radius:10px}
+.paint-row{display:flex;gap:14px;margin:6px 0 10px}.paint-cell{display:flex;flex-direction:column;align-items:center;gap:4px;font:11px var(--mono);color:var(--faint)}.paint-cell canvas{border:1px solid var(--line);border-radius:6px;image-rendering:pixelated;background:#fff}
+.paint-group{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}.paint-group .c{display:flex;flex-direction:column;align-items:center;font:10.5px var(--mono);color:var(--muted)}.paint-group canvas{width:56px;height:56px;border:1px solid var(--line);border-radius:4px;image-rendering:pixelated;background:#fff}.paint-group .c.best canvas{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.sample{font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;background:var(--panel-2);border-radius:10px;padding:10px 12px;min-height:64px;color:var(--ink)}
+.math{font-family:var(--mono);font-size:12.5px;color:var(--muted);background:var(--panel-2);padding:8px 12px;border-radius:8px;overflow-x:auto}
+.tokens span{display:inline-block;padding:1px 5px;margin:2px;border-radius:5px;background:var(--panel-2);font-family:var(--mono);font-size:12px}
+.tokens span.m{background:var(--accent-soft)}
+.legend{display:flex;gap:12px;font:500 11.5px/1 var(--mono);color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.marin{border-left:3px solid var(--accent);padding-left:14px}
+.marin h3{color:var(--accent)}
+.note{font-size:13px;color:var(--muted)}
+.note.warn{color:var(--warn)}
+.tab{display:inline-flex;gap:4px;background:var(--panel-2);border-radius:8px;padding:3px;margin-bottom:10px}
+.tab button{border:0;background:transparent;padding:5px 10px;font:500 12px/1 var(--mono);color:var(--muted);border-radius:6px}
+.tab button.on{background:var(--panel);color:var(--ink)}
+.flow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:14px 0 22px}
+.flow a{display:block;text-decoration:none;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 12px;min-height:96px}
+.flow a b{display:block;font:700 15px/1.2 var(--display)}
+.flow a small{display:block;color:var(--muted);font-size:12px;margin-top:6px;line-height:1.35}
+.flow a:hover{border-color:var(--accent)}
+@media (max-width:1000px){.flow{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-family:var(--mono);font-size:12.5px}
+.kv b{color:var(--muted);font-weight:500}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="lab">
+  <nav class="nav">
+    <a class="back" href="/" title="Back to Cortex">← Cortex</a>
+    <h1>Training Lab</h1>
+    <div class="sub">Marin's pipeline, in your browser</div>
+    <a class="st on" href="#overview" data-st="overview"><b>Map</b>How the stages fit</a>
+    <a class="st" href="#data" data-st="data"><b>1 · Data</b>Tokens and windows</a>
+    <a class="st" href="#pretrain" data-st="pretrain"><b>2 · Pretrain</b>A decoder learns next-token</a>
+    <a class="st" href="#midtrain" data-st="midtrain"><b>3 · Mid-train</b>Change the mix, cool the rate</a>
+    <a class="st" href="#posttrain" data-st="posttrain"><b>4 · Post-train</b>SFT, then DPO</a>
+    <a class="st" href="#encoder" data-st="encoder"><b>5 · Encoder</b>Masked LM to embeddings</a>
+    <a class="st" href="#cluster" data-st="cluster"><b>6 · Cluster</b>k-means on the embeddings</a>
+    <a class="st" href="#paint" data-st="paint"><b>7 · Paint</b>RL with a rendered reward</a>
+    <div class="foot">
+      <div>backend <b id="backend">…</b></div>
+      <div>params per toy model <b id="nparams">…</b></div>
+      <div class="pill" id="gpu">checking WebGL</div>
+    </div>
+  </nav>
+
+  <main>
+    <!-- ================================================================ OVERVIEW -->
+    <section class="station on" id="s-overview">
+      <div class="eyebrow">Map</div>
+      <h2>Six stages, one tiny transformer, trained in front of you</h2>
+      <p class="lede">Every station below trains a real model with real gradients on your GPU, small enough to converge in under a minute. Beside each toy is the matching call in Marin, Stanford's open pipeline (JAX and Levanter). The toy uses characters instead of a 128k-token BPE vocabulary and two layers of width 48 instead of 32 layers of width 4096; the loss functions, the schedules, and the failure modes are the same.</p>
+      <div class="flow">
+        <a href="#data"><b>Data</b><small>text → token ids → fixed windows, packed into batches</small></a>
+        <a href="#pretrain"><b>Pretrain</b><small>decoder, causal attention, next-token cross-entropy</small></a>
+        <a href="#midtrain"><b>Mid-train</b><small>new data mix, learning rate cooldown, watch domains trade off</small></a>
+        <a href="#posttrain"><b>Post-train</b><small>SFT on answers only, then DPO against a frozen reference</small></a>
+        <a href="#encoder"><b>Encoder</b><small>bidirectional, masked LM, then contrastive pairs → embeddings</small></a>
+        <a href="#cluster"><b>Cluster</b><small>k-means over the embedding cloud, purity vs the true topics</small></a>
+        <a href="#paint"><b>Paint with code</b><small>a policy writes drawing programs; render, score against a reference, GRPO update</small></a>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Decoder vs encoder, the one picture</h3>
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px">
+            <div><canvas class="sq" id="maskCausal"></canvas><div class="note" style="text-align:center;margin-top:6px">causal mask: token t sees ≤ t</div></div>
+            <div><canvas class="sq" id="maskFull"></canvas><div class="note" style="text-align:center;margin-top:6px">full mask: every token sees all</div></div>
+          </div>
+          <p>That triangle is the whole difference between a GPT and a BERT at the architecture level. Everything else (the residual stream, attention heads, the MLP) is shared. The decoder is trained to predict the next token and can generate; the encoder is trained to fill blanks and produces a representation of the whole input, which is what an embedding model returns.</p>
+        </div>
+        <div class="card marin">
+          <h3>Marin, the real thing</h3>
+          <p>Marin defines a run as a graph of steps, executed in dependency order like a Makefile: download → tokenize → train → evaluate. The beginner tutorial trains <code>llama_nano</code> on TinyStories with a hundred steps on CPU.</p>
+<pre>from marin.experiment.train import train_lm
+from experiments.llama import llama_nano
+from levanter.optim.config import AdamConfig
+
+model = train_lm(
+    name="checkpoints/tiny-tinystories",
+    model=llama_nano,
+    datasets={tinystories_tokenized: 1.0},
+    optimizer=AdamConfig(learning_rate=6e-4,
+                         weight_decay=0.1),
+    batch_size=32, seq_len=model.max_seq_len,
+    num_train_steps=100,
+)</pre>
+          <p class="note">Source: <code>experiments/tutorials/train_tiny_model.py</code> in <a href="https://github.com/marin-community/marin" target="_blank" rel="noopener">marin-community/marin</a>. Each station quotes the piece that matches.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 1 DATA -->
+    <section class="station" id="s-data">
+      <div class="eyebrow">Station 1</div>
+      <h2>Data: text becomes windows of token ids</h2>
+      <p class="lede">A model never sees text. It sees integers. Tokenization maps characters (here) or byte-pair pieces (in Marin) to ids, and training slices the id stream into fixed windows so a batch is a rectangle the GPU can chew.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Corpus</h3>
+          <div class="controls">
+            <label>corpus <select id="corpusSel"><option value="stories">tiny stories (domain A)</option><option value="arith">arithmetic lines (domain B)</option><option value="own">paste your own</option></select></label>
+            <label>window <select id="ctxSel"><option>32</option><option selected>48</option><option>64</option></select></label>
+          </div>
+          <textarea id="ownText" rows="4" style="width:100%;display:none" placeholder="Paste a few paragraphs. Character-level, so 2 to 20 KB is plenty."></textarea>
+          <div class="kv" style="margin:10px 0">
+            <b>characters</b><span id="dChars">…</span>
+            <b>vocab</b><span id="dVocab">…</span>
+            <b>windows</b><span id="dWindows">…</span>
+            <b>batch</b><span id="dBatch">16 windows</span>
+          </div>
+          <h3 style="margin-top:14px">One window, as the model sees it</h3>
+          <div class="tokens" id="dTokens"></div>
+          <p class="note">Input is the window; the target is the same window shifted one to the left. Every position is a training example at once, which is why decoders learn so fast per token.</p>
+        </div>
+        <div class="card marin">
+          <h3>In Marin</h3>
+<pre>from marin.processing.tokenize.tokenize import TokenizedCache
+from experiments.marin_tokenizer import marin_tokenizer
+
+tinystories_tokenized = tokenized(
+    "roneneldan/TinyStories",
+    tokenizer=marin_tokenizer,   # Llama-3 style BPE, 128k vocab
+    sample_count=1000,
+)</pre>
+          <p>Marin tokenizes once into a cache and every later step depends on that cache, so re-running an experiment never re-tokenizes. The vocabulary is byte-pair pieces, which is why "the" is one id there and three ids here.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 2 PRETRAIN -->
+    <section class="station" id="s-pretrain">
+      <div class="eyebrow">Station 2</div>
+      <h2>Pretrain a decoder: minimize next-token cross-entropy</h2>
+      <p class="lede">Two layers, width 48, three heads, causal attention. The loss is the average negative log-probability of the true next character. Watch it fall from ln(vocab) (uniform guessing) toward the corpus's own entropy, and watch the attention map organize itself.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="controls">
+            <button type="button" class="primary" id="ptRun">Train</button>
+            <button type="button" id="ptReset">Reset</button>
+            <label>lr <select id="ptLr"><option>0.003</option><option selected>0.006</option><option>0.012</option></select></label>
+            <label>steps <select id="ptSteps"><option>300</option><option selected>800</option><option>2000</option></select></label>
+          </div>
+          <div><span class="stat">step <b id="ptStep">0</b></span><span class="stat">loss <b id="ptLoss">–</b></span><span class="stat">uniform <b id="ptUni">–</b></span><span class="stat">ms/step <b id="ptMs">–</b></span></div>
+          <canvas class="chart" id="ptChart"></canvas>
+          <div class="legend"><span><i style="background:var(--c1)"></i>train loss</span><span><i style="background:var(--faint)"></i>uniform baseline</span></div>
+          <h3 style="margin-top:14px">Sample, greedy from a prompt</h3>
+          <div class="sample" id="ptSample">(train first)</div>
+        </div>
+        <div>
+          <div class="card">
+            <h3>Attention, layer 1 head 1</h3>
+            <canvas class="sq" id="ptAttn"></canvas>
+            <p class="note">Rows are query positions, columns are keys; only the lower triangle can be non-zero. Early on it's a blur. After a few hundred steps you'll see the diagonal (copy the previous character) and vertical stripes on spaces (attend to word boundaries).</p>
+          </div>
+          <div class="card marin" style="margin-top:14px">
+            <h3>In Marin</h3>
+<pre>train_lm(model=llama_nano,            # decoder, RoPE, SwiGLU
+         datasets={tinystories_tokenized: 1.0},
+         optimizer=AdamConfig(learning_rate=6e-4,
+                              weight_decay=0.1),
+         num_train_steps=100)</pre>
+            <div class="math">L = −(1/N) Σ_t log p(x_{t+1} | x_{≤t})</div>
+            <p>Same loss. Marin's model is a Llama-shaped decoder (rotary positions, SwiGLU MLP); this toy uses learned positions and GELU so the code stays short. AdamW with weight decay 0.1 and a warmup-then-cosine schedule is the standard recipe; the toy uses Adam with a constant rate.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 3 MIDTRAIN -->
+    <section class="station" id="s-midtrain">
+      <div class="eyebrow">Station 3</div>
+      <h2>Mid-training: change the data mix and cool the learning rate</h2>
+      <p class="lede">Real runs don't end when pretraining ends. In the last stretch the mix shifts toward higher-quality or targeted data and the learning rate decays to near zero. Here: continue the station-2 model on a mix of stories and arithmetic while the rate cools, and watch the two domain losses trade off.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="controls">
+            <button type="button" class="primary" id="mtRun">Continue training</button>
+            <button type="button" id="mtReset">Reset to pretrained</button>
+            <label>mix B <select id="mtMix"><option>0.3</option><option selected>0.6</option><option>0.9</option></select></label>
+            <label>cooldown <select id="mtCool"><option value="1">linear to 0</option><option value="0">constant lr</option></select></label>
+            <label>steps <select id="mtSteps"><option>300</option><option selected>600</option></select></label>
+          </div>
+          <div><span class="stat">step <b id="mtStep">0</b></span><span class="stat">loss A <b id="mtA">–</b></span><span class="stat">loss B <b id="mtB">–</b></span><span class="stat">lr <b id="mtLr">–</b></span></div>
+          <canvas class="chart" id="mtChart"></canvas>
+          <div class="legend"><span><i style="background:var(--c1)"></i>domain A (stories)</span><span><i style="background:var(--c2)"></i>domain B (arithmetic)</span><span><i style="background:var(--faint)"></i>lr, scaled</span></div>
+          <div class="sample" id="mtSample" style="margin-top:12px">(continue training to sample from both domains)</div>
+        </div>
+        <div class="card marin">
+          <h3>In Marin</h3>
+<pre>train_lm(model=llama_nano,
+         datasets={tinystories_tokenized: 0.4,
+                   arithmetic_tokenized: 0.6},   # new mixture
+         optimizer=AdamConfig(learning_rate=6e-4,
+                              weight_decay=0.1,
+                              # decay to ~0 over the cooldown
+                              ),
+         initialize_from=pretrained_checkpoint,
+         num_train_steps=...)</pre>
+          <p>Marin expresses a mixture as weights per tokenized dataset; the loader samples proportionally. The cooldown is the tail of the learning-rate schedule. Two things to watch for, both visible in the toy: catastrophic forgetting of domain A when the mix is lopsided, and the sharp loss drop that a cooldown gives for free, which is why people report "cooldown" runs separately.</p>
+          <p class="note warn">Try mix B at 0.9 with a constant rate: domain A loss climbs. Then 0.6 with cooldown: both settle.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 4 POSTTRAIN -->
+    <section class="station" id="s-posttrain">
+      <div class="eyebrow">Station 4</div>
+      <h2>Post-training: SFT teaches the format, DPO teaches the preference</h2>
+      <p class="lede">A pretrained model completes text. Post-training turns it into something that answers. Supervised fine-tuning trains only on the answer tokens of question/answer pairs. Direct preference optimization then pushes chosen answers above rejected ones relative to a frozen copy of the SFT model.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="tab"><button type="button" class="on" data-pt="sft">SFT</button><button type="button" data-pt="dpo">DPO</button></div>
+          <div id="ptSft">
+            <div class="controls">
+              <button type="button" class="primary" id="sftRun">Run SFT</button>
+              <button type="button" id="sftReset">Reset to mid-trained</button>
+              <label>steps <select id="sftSteps"><option>200</option><option selected>400</option></select></label>
+            </div>
+            <div><span class="stat">step <b id="sftStep">0</b></span><span class="stat">answer loss <b id="sftLoss">–</b></span></div>
+            <canvas class="chart" id="sftChart"></canvas>
+            <h3 style="margin-top:14px">Ask it</h3>
+            <div class="controls"><select id="sftQ"></select><button type="button" id="sftAsk">Answer</button></div>
+            <div class="sample" id="sftSample">(run SFT, then ask)</div>
+          </div>
+          <div id="ptDpo" style="display:none">
+            <div class="controls">
+              <button type="button" class="primary" id="dpoRun">Run DPO</button>
+              <button type="button" id="dpoReset">Reset to SFT</button>
+              <label>β <select id="dpoBeta"><option>0.1</option><option selected>0.5</option><option>2</option></select></label>
+              <label>steps <select id="dpoSteps"><option>150</option><option selected>300</option></select></label>
+            </div>
+            <div><span class="stat">step <b id="dpoStep">0</b></span><span class="stat">loss <b id="dpoLoss">–</b></span><span class="stat">margin <b id="dpoMargin">–</b></span><span class="stat">accuracy <b id="dpoAcc">–</b></span></div>
+            <canvas class="chart" id="dpoChart"></canvas>
+            <div class="legend"><span><i style="background:var(--c1)"></i>DPO loss</span><span><i style="background:var(--c2)"></i>reward margin (chosen − rejected)</span></div>
+            <h3 style="margin-top:14px">Preference pairs used</h3>
+            <div class="sample" id="dpoPairs"></div>
+            <h3 style="margin-top:14px">Ask it again</h3>
+            <div class="controls"><select id="dpoQ"></select><button type="button" id="dpoAsk">Answer</button></div>
+            <div class="sample" id="dpoSample">(run DPO, then ask)</div>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <h3>What each loss looks at</h3>
+            <div class="tokens" id="sftMaskViz"></div>
+            <p class="note">Highlighted tokens are the only ones SFT is graded on. The question is context, not target; grading it would just teach the model to parrot prompts.</p>
+            <div class="math" style="margin-top:10px">L_DPO = −log σ( β [ log π(y_w|x) − log π_ref(y_w|x) − log π(y_l|x) + log π_ref(y_l|x) ] )</div>
+            <p class="note">π is the policy being trained, π_ref the frozen SFT model, y_w the chosen answer, y_l the rejected one. The bracket is the implicit reward margin. β sets how far the policy may drift from the reference; too large and it collapses onto the preference data.</p>
+          </div>
+          <div class="card marin" style="margin-top:14px">
+            <h3>In Marin</h3>
+            <p>SFT in Marin is another <code>train_lm</code>-style run over chat-formatted data with loss masking on the assistant turns, initialized from the pretrained checkpoint. Preference training runs on top of Levanter's DPO trainer with a frozen reference. The 8B and 32B retrospectives in the repo's experiment reports describe the exact mixes; the shape is what you see here: format first, then preference.</p>
+            <p class="note">Marin's experiments live under <code>experiments/</code>; the post-training configs are per-run scripts rather than a single module, so this station quotes the shape, not a path.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 5 ENCODER -->
+    <section class="station" id="s-encoder">
+      <div class="eyebrow">Station 5</div>
+      <h2>Encoder: masked language modeling, then contrastive pairs, then embeddings</h2>
+      <p class="lede">Same transformer, mask removed. Stage one hides 15% of characters and asks the model to fill them (that's BERT, and it's how nomic-bert-2048 starts). Stage two throws away the fill-in head and trains the pooled vector so windows from the same document sit close and others sit far (InfoNCE). The result is an embedding model: text in, one vector out.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="controls">
+            <button type="button" class="primary" id="encMlm">1 · Masked LM</button>
+            <button type="button" class="primary" id="encCon">2 · Contrastive</button>
+            <button type="button" id="encReset">Reset</button>
+            <label>steps <select id="encSteps"><option>200</option><option selected>400</option></select></label>
+          </div>
+          <div><span class="stat">phase <b id="encPhase">idle</b></span><span class="stat">step <b id="encStep">0</b></span><span class="stat">loss <b id="encLoss">–</b></span><span class="stat">nn purity <b id="encPurity">–</b></span></div>
+          <canvas class="chart" id="encChart"></canvas>
+          <div class="legend"><span><i style="background:var(--c3)"></i>MLM loss</span><span><i style="background:var(--c1)"></i>InfoNCE loss</span></div>
+          <h3 style="margin-top:14px">Nearest neighbours</h3>
+          <div class="controls"><select id="encQ"></select><button type="button" id="encFind">Find</button></div>
+          <div class="sample" id="encNN">(train, then search)</div>
+        </div>
+        <div>
+          <div class="card">
+            <h3>Embedding space, PCA to 2-D</h3>
+            <canvas class="sq" id="encScatter"></canvas>
+            <div class="legend"><span><i style="background:var(--c1)"></i>weather</span><span><i style="background:var(--c2)"></i>cooking</span><span><i style="background:var(--c3)"></i>machines</span></div>
+            <p class="note">Before contrastive training the three topics overlap: MLM makes the model good at local prediction, not at global similarity. After a few hundred InfoNCE steps the clouds separate, and "nn purity" (how often a sentence's nearest neighbour shares its topic) climbs.</p>
+          </div>
+          <div class="card marin" style="margin-top:14px">
+            <h3>In the real recipe (nomic-embed, and Marin's encoder work)</h3>
+            <div class="math">L = −log exp(s(q,d⁺)/τ) / Σ_d exp(s(q,d)/τ)</div>
+            <p>Pretrain a BERT-shaped encoder with MLM (30% masking, 2048 tokens), then contrastive-train on ~235M weak pairs with batch 16k so each batch carries thousands of negatives, then fine-tune on curated pairs with mined hard negatives. Mean-pool, normalize, dot product. The toy does the same two stages with batch 32.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 6 CLUSTER -->
+    <section class="station" id="s-cluster">
+      <div class="eyebrow">Station 6</div>
+      <h2>Cluster the embeddings with k-means</h2>
+      <p class="lede">Clustering needs no labels and no training; it's the first thing you do with a new embedding model to see whether the space means anything. Each step assigns points to the nearest centroid, then moves centroids to their members' mean. Purity compares the clusters to the hidden topics.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="controls">
+            <button type="button" class="primary" id="kmStep">Step</button>
+            <button type="button" id="kmRun">Run to convergence</button>
+            <button type="button" id="kmReset">Reseed</button>
+            <label>k <select id="kmK"><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+          </div>
+          <div><span class="stat">iteration <b id="kmIter">0</b></span><span class="stat">inertia <b id="kmInertia">–</b></span><span class="stat">purity <b id="kmPurity">–</b></span><span class="stat">moved <b id="kmMoved">–</b></span></div>
+          <canvas class="sq" id="kmCanvas"></canvas>
+          <p class="note">Points are the station-5 embeddings (PCA to 2-D for drawing; the assignment runs in the full 48-D space). Rings are centroids. Colour is the cluster; the small inner dot is the true topic, so a mismatch shows as two colours on one point.</p>
+        </div>
+        <div class="card marin">
+          <h3>Where this shows up in a pipeline</h3>
+          <p>Data curation. Marin-style pipelines embed a crawl, cluster it, and use the clusters to balance the mixture, deduplicate near-copies, or drop junk regions of the space before tokenization. Clustering also grades an embedding model without labels: if k-means recovers your known topics, the encoder learned something usable.</p>
+          <div class="math">inertia = Σ_i ‖x_i − μ_{c(i)}‖², purity = (1/N) Σ_k max_j |C_k ∩ T_j|</div>
+          <p class="note">Try k=5 on three topics: two topics split, inertia drops, purity barely moves. That's the elbow argument in one click.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 7 PAINT WITH CODE -->
+    <section class="station" id="s-paint">
+      <div class="eyebrow">Station 7</div>
+      <h2>Train a policy to paint with code</h2>
+      <p class="lede">The loop from Hugging Face's "Train to paint with code": the model writes a program, the program is rendered, the picture is scored, and the policy is updated with GRPO. Nothing here is a language model (the policy is a table of logits over a tiny drawing language), but every part of the loop is the real one: sample a group, render each candidate, compute a composite reward with a gate, normalize advantages within the group, take a policy-gradient step with a KL leash to the starting policy.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="controls">
+            <button type="button" class="primary" id="paintRun">Train</button>
+            <button type="button" id="paintStep">One step</button>
+            <button type="button" id="paintReset">Reset policy</button>
+            <label>group G <select id="paintG"><option>4</option><option selected>8</option><option>16</option></select></label>
+            <label>steps <select id="paintSteps"><option>50</option><option selected>150</option><option>400</option></select></label>
+            <label>lr <select id="paintLr"><option>0.02</option><option selected>0.05</option><option>0.15</option></select></label>
+            <label>β KL <select id="paintBeta"><option>0</option><option selected>0.02</option><option>0.1</option></select></label>
+          </div>
+          <div><span class="stat">step <b id="paintStepN">0</b></span><span class="stat">reward mean <b id="paintMean">–</b></span><span class="stat">best ever <b id="paintBest">–</b></span><span class="stat">blank rate <b id="paintBlank">–</b></span><span class="stat">KL <b id="paintKL">–</b></span></div>
+          <div class="paint-row">
+            <div class="paint-cell"><canvas id="paintRef" width="96" height="96"></canvas><small>reference</small></div>
+            <div class="paint-cell"><canvas id="paintBestC" width="96" height="96"></canvas><small>best so far</small></div>
+            <div class="paint-cell"><canvas id="paintMode" width="96" height="96"></canvas><small>policy mode</small></div>
+          </div>
+          <div class="paint-group" id="paintGroup"></div>
+          <canvas class="chart" id="paintChart"></canvas>
+          <div class="sample" id="paintProg">(train to see the best program)</div>
+        </div>
+        <div class="card marin">
+          <h3>The reward, and where the numbers come from</h3>
+          <p>Each candidate is a program of 6 strokes; each stroke is a shape (disc or square), a position on an 8×8 grid, one of 4 sizes and 4 shades. The reward is a weighted sum in the same spirit as the post: a gate (0.05, the canvas is not blank), a coverage term (0.05), and similarity to the reference (0.90, a Dice-style overlap: one minus the squared error divided by the two energies, so flooding the canvas is punished as much as leaving it blank). The post uses a VLM pairwise judge and an aesthetic model in place of the similarity term; the structure is identical.</p>
+          <div class="math">A_i = (r_i − mean(r)) / (std(r) + ε),   ∇ = (1/G) Σ_i A_i ∇ log π(a_i) − β ∇ KL(π ‖ π₀)</div>
+          <p>Watch the blank rate first: in the post every run "first learned to stop producing bad paintings", and here the gate does the same job within a few steps. Then watch the mean climb past the best-ever line stalling: the policy sharpens (KL rises) around one good program, which is the exploration collapse that the group normalization delays but does not prevent.</p>
+          <p class="note">Set β to 0 and G to 4 to see collapse early; set G to 16 to see how much of GRPO's stability is just a better baseline. Lab 15 has the full derivation and the 5090 recipe (recipes/paint_grpo.py) with a real language-model policy.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(() => {
+"use strict";
+// ---------------------------------------------------------------- corpora (original text, small on purpose)
+const STORIES = `the little fox found a red ball under the tree. she rolled it to the river and it floated away. the frog said, do not be sad, i will get it. the frog swam and pushed the ball back. the fox was happy and they played all day.
+a boy named tom had a blue kite. the wind was strong so the kite went high. tom held the string tight. his dog ran and barked at the sky. when the sun went down they walked home.
+the cat sat on the warm step. a bird sang in the tall tree. the cat watched and did not move. then the rain came and the cat ran inside. it slept by the fire until morning.
+mia lost her hat in the park. her friend sam looked under the bench. the hat was on a duck. they laughed and the duck gave it back. mia said thank you and they shared a cake.
+the old bear liked honey more than fish. every day he walked to the big tree. the bees were busy but kind. they gave him a little pot. the bear said this is the best day.
+a small robot lived in a shed. it liked to count the stars at night. one night a star fell into the garden. the robot picked it up and it was warm. it kept the star in a jar by the window.
+the girl planted a seed in a cup. she gave it water every morning. a green leaf came out, then a flower. she took it to school and everyone smiled. the teacher put it on the sunny sill.
+two rabbits raced to the hill. the grey one was fast but the brown one knew a short path. they reached the top together and ate clover. the moon rose and they hopped home side by side.
+the boat was tiny and yellow. dad and lily rowed across the pond. a fish jumped and splashed them. lily giggled and dad rowed faster. on the far side they found wild berries.
+the wind took the farmer's hat over the fence. the goat caught it on one horn. the farmer laughed and gave the goat an apple. after that the goat wore the hat every windy day.`;
+const ARITH = (() => { const L = []; let s = 7; const r = () => (s = (s * 48271) % 2147483647) % 20; for (let i = 0; i < 160; i++) { const a = r(), b = r(); const op = i % 3; L.push(op === 0 ? `${a} + ${b} = ${a + b}` : op === 1 ? `${a} - ${b} = ${a - b}` : `${a} * ${b} = ${a * b}`); } return L.join("\n"); })();
+const QA = [
+  ["what color is the sky", "blue"], ["what do bees make", "honey"], ["what do fish do", "swim"], ["how many legs has a dog", "four"], ["what does a cat say", "meow"],
+  ["what is 2 + 3", "5"], ["what is 4 * 2", "8"], ["what is 9 - 4", "5"], ["what is 6 + 6", "12"], ["what is 3 * 3", "9"],
+  ["what is warm", "the sun"], ["what falls from clouds", "rain"], ["what do birds do", "sing"], ["what is 7 + 1", "8"], ["what is 5 - 2", "3"],
+  ["who rowed the boat", "dad and lily"], ["what did the fox find", "a red ball"], ["what did tom fly", "a blue kite"], ["what did the bear like", "honey"], ["what did the girl plant", "a seed"],
+];
+const PREFS = [ // chosen answers are short and correct; rejected ones are wordy or wrong
+  ["what is 2 + 3", "5", "2 + 3 is a sum and the sum is 6"], ["what color is the sky", "blue", "the sky is green most days"], ["what do bees make", "honey", "bees make milk and eggs"],
+  ["what is 4 * 2", "8", "4 * 2 = 6"], ["what do fish do", "swim", "fish fly in the sky"], ["how many legs has a dog", "four", "a dog has three legs"],
+  ["what is 9 - 4", "5", "it is 4"], ["what does a cat say", "meow", "a cat says woof"], ["what falls from clouds", "rain", "cake falls from clouds"],
+  ["what is 6 + 6", "12", "13"], ["what did the fox find", "a red ball", "a blue kite"], ["what did tom fly", "a blue kite", "a red ball"],
+];
+const TOPICS = { // 3 topics × 14 sentences for the encoder and the clustering station
+  weather: ["the rain fell all afternoon on the wet roofs", "a cold wind pushed the clouds across the hills", "snow covered the road before dawn", "the storm bent the trees and rattled the windows", "fog sat low over the river until noon", "the sun broke through after the shower", "hail tapped on the tin roof for a minute", "a warm breeze dried the grass by evening", "thunder rolled far off beyond the fields", "frost drew lines on the glass at night", "the sky cleared and the stars came out", "heavy clouds gathered over the bay", "the drizzle turned into a downpour", "ice made the path slick and bright"],
+  cooking: ["she stirred the onions until they turned soft and sweet", "the bread rose slowly in the warm oven", "he salted the water and dropped in the pasta", "the soup simmered with garlic and thyme", "butter melted in the pan and began to foam", "they chopped carrots for the stew", "the cake cooled on the rack by the window", "a pinch of pepper finished the sauce", "rice steamed under a tight lid", "she whisked eggs with a little milk", "the roast rested before he carved it", "lemon juice brightened the dressing", "the pie crust baked to a golden brown", "he toasted seeds for the salad"],
+  machines: ["the engine turned over and settled into a hum", "a gear slipped and the belt began to squeal", "the pump pushed water up through the pipe", "he tightened the bolt with a long wrench", "the motor drew too much current and tripped the fuse", "pistons moved in the cylinder with a steady beat", "the drill bit chewed through the steel plate", "oil dripped from the crankcase onto the floor", "the fan spun faster as the sensor warmed", "a spring returned the lever to its stop", "the compressor kicked on with a thud", "gears meshed in the gearbox under load", "the valve opened and the pressure fell", "the shaft spun true after he balanced it"],
+};
+const TOPIC_NAMES = Object.keys(TOPICS);
+const TOPIC_COLORS = ["--c1", "--c2", "--c3", "--c4", "--warn"];
+
+// ---------------------------------------------------------------- tokenizer (characters), shared vocab across corpora
+const ALLTEXT = STORIES + "\n" + ARITH + "\n" + QA.flat().join(" ") + PREFS.flat().join(" ") + Object.values(TOPICS).flat().join(" ") + " q:a:|_";
+const CHARS = Array.from(new Set(ALLTEXT.split(""))).sort();
+const MASK_ID = CHARS.indexOf("_");   // used as [MASK] in the encoder
+const stoi = new Map(CHARS.map((c, i) => [c, i]));
+const V = CHARS.length;
+const enc = (s) => Array.from(s).map((c) => stoi.has(c) ? stoi.get(c) : stoi.get(" "));
+const dec = (ids) => ids.map((i) => CHARS[i] ?? "?").join("");
+
+// ---------------------------------------------------------------- tiny transformer in tf.js
+const D = 48, H = 3, DH = D / H, LAYERS = 2, MAXCTX = 64;
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function makeParams(seed = 1) {
+  const init = (shape, scale) => tf.variable(tf.randomNormal(shape, 0, scale, "float32", seed++));
+  const p = { tok: init([V, D], 0.08), pos: init([MAXCTX, D], 0.02), layers: [], lnfG: tf.variable(tf.ones([D])), lnfB: tf.variable(tf.zeros([D])) };
+  for (let l = 0; l < LAYERS; l++) {
+    p.layers.push({
+      wq: init([D, D], 0.1), wk: init([D, D], 0.1), wv: init([D, D], 0.1), wo: init([D, D], 0.1 / Math.sqrt(2 * LAYERS)),
+      ln1G: tf.variable(tf.ones([D])), ln1B: tf.variable(tf.zeros([D])),
+      w1: init([D, 4 * D], 0.1), b1: tf.variable(tf.zeros([4 * D])), w2: init([4 * D, D], 0.1 / Math.sqrt(2 * LAYERS)), b2: tf.variable(tf.zeros([D])),
+      ln2G: tf.variable(tf.ones([D])), ln2B: tf.variable(tf.zeros([D])),
+    });
+  }
+  return p;
+}
+function paramList(p) { const out = [p.tok, p.pos, p.lnfG, p.lnfB]; for (const l of p.layers) out.push(...Object.values(l)); return out; }
+function countParams(p) { return paramList(p).reduce((n, v) => n + v.size, 0); }
+function copyParams(dst, src) { const a = paramList(dst), b = paramList(src); for (let i = 0; i < a.length; i++) a[i].assign(b[i]); }
+function cloneParams(src) { const p = makeParams(99); copyParams(p, src); return p; }
+function disposeParams(p) { for (const v of paramList(p)) v.dispose(); }
+
+/** [B,T,Din] x [Din,Dout] -> [B,T,Dout]. tf.js broadcasts 3D x 2D forward but its gradient does not reduce the batch dim, so flatten first. */
+function lin(x, w) { const [B, T, Din] = x.shape; return x.reshape([B * T, Din]).matMul(w).reshape([B, T, w.shape[1]]); }
+function layerNorm(x, g, b) {
+  const { mean, variance } = tf.moments(x, -1, true);
+  return x.sub(mean).div(variance.add(1e-5).sqrt()).mul(g).add(b);
+}
+/** x: [B,T] int32 ids. Returns {logits:[B,T,V], h:[B,T,D], attn:[B,H,T,T] of layer 0} */
+function forward(p, x, causal, wantAttn = false) {
+  const [B, T] = x.shape;
+  let h = tf.gather(p.tok, x).add(p.pos.slice([0, 0], [T, D]));
+  let attn0 = null;
+  const mask = causal ? tf.linalg.bandPart(tf.ones([T, T]), -1, 0) : null;
+  for (let li = 0; li < LAYERS; li++) {
+    const L = p.layers[li];
+    const n1 = layerNorm(h, L.ln1G, L.ln1B);
+    const split = (w) => lin(n1, w).reshape([B, T, H, DH]).transpose([0, 2, 1, 3]); // [B,H,T,DH]
+    const q = split(L.wq), k = split(L.wk), v = split(L.wv);
+    let s = q.matMul(k, false, true).div(Math.sqrt(DH));               // [B,H,T,T]
+    if (mask) s = s.add(mask.sub(1).mul(1e9));
+    const a = tf.softmax(s, -1);
+    if (wantAttn && li === 0) attn0 = a;
+    const o = a.matMul(v).transpose([0, 2, 1, 3]).reshape([B * T, D]).matMul(L.wo).reshape([B, T, D]);
+    h = h.add(o);
+    const n2 = layerNorm(h, L.ln2G, L.ln2B);
+    const pre = lin(n2, L.w1).add(L.b1);
+    const act = tf.gelu ? tf.gelu(pre) : pre.mul(0.5).mul(tf.tanh(pre.mul(0.7978845608)).add(1)); // exact-ish GELU fallback
+    h = h.add(lin(act, L.w2).add(L.b2));
+  }
+  h = layerNorm(h, p.lnfG, p.lnfB);
+  const logits = h.reshape([B * T, D]).matMul(p.tok, false, true).reshape([B, T, V]); // tied head
+  return { logits, h, attn: attn0 };
+}
+function ceLoss(logits, targets, weights) { // logits [B,T,V], targets [B,T] int32, weights [B,T] float (optional)
+  const lp = tf.logSoftmax(logits, -1);
+  const oneHot = tf.oneHot(targets, V).cast("float32");
+  const nll = lp.mul(oneHot).sum(-1).neg(); // [B,T]
+  if (!weights) return nll.mean();
+  return nll.mul(weights).sum().div(weights.sum().add(1e-6));
+}
+/** log p(y | x) summed over answer positions, for a batch of packed sequences */
+function seqLogProb(p, ids, weights) {
+  const { logits } = forward(p, ids, true);
+  const inp = logits.slice([0, 0, 0], [ids.shape[0], ids.shape[1] - 1, V]);
+  const tgt = ids.slice([0, 1], [ids.shape[0], ids.shape[1] - 1]);
+  const w = weights.slice([0, 1], [ids.shape[0], ids.shape[1] - 1]);
+  const lp = tf.logSoftmax(inp, -1).mul(tf.oneHot(tgt, V).cast("float32")).sum(-1); // [B,T-1]
+  return lp.mul(w).sum(-1); // [B]
+}
+
+// ---------------------------------------------------------------- data helpers
+function windows(text, T) { const ids = enc(text); const out = []; for (let i = 0; i + T + 1 <= ids.length; i += Math.max(1, Math.floor(T / 2))) out.push(ids.slice(i, i + T + 1)); return out; }
+function batchFrom(wins, B, rnd) { const xs = [], ys = []; for (let i = 0; i < B; i++) { const w = wins[Math.floor(rnd() * wins.length)]; xs.push(w.slice(0, -1)); ys.push(w.slice(1)); } return { x: tf.tensor2d(xs, [B, xs[0].length], "int32"), y: tf.tensor2d(ys, [B, ys[0].length], "int32") }; }
+let seed = 12345; const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+
+function greedy(p, prompt, n, temp = 0) {
+  let ids = enc(prompt).slice(-MAXCTX);
+  for (let i = 0; i < n; i++) {
+    const next = tf.tidy(() => {
+      const x = tf.tensor2d([ids.slice(-MAXCTX)], [1, Math.min(ids.length, MAXCTX)], "int32");
+      const { logits } = forward(p, x, true);
+      const last = logits.slice([0, x.shape[1] - 1, 0], [1, 1, V]).reshape([V]);
+      if (temp > 0) return tf.multinomial(last.div(temp), 1).dataSync()[0];
+      return last.argMax().dataSync()[0];
+    });
+    ids.push(next);
+    if (CHARS[next] === "|") break;
+  }
+  return dec(ids.slice(enc(prompt).slice(-MAXCTX).length));
+}
+
+// ---------------------------------------------------------------- charts
+function lineChart(canvas, series, opts = {}) {
+  const dpr = window.devicePixelRatio || 1; const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const pad = { l: 40, r: 10, t: 10, b: 22 };
+  const all = series.flatMap((s) => s.data); if (!all.length) return;
+  const n = Math.max(...series.map((s) => s.data.length));
+  let ymin = opts.ymin ?? Math.min(...all), ymax = opts.ymax ?? Math.max(...all); if (ymax - ymin < 1e-6) ymax = ymin + 1;
+  const X = (i) => pad.l + (i / Math.max(1, n - 1)) * (w - pad.l - pad.r), Y = (v) => pad.t + (1 - (v - ymin) / (ymax - ymin)) * (h - pad.t - pad.b);
+  g.strokeStyle = cssVar("--line"); g.lineWidth = 1; g.font = "11px " + cssVar("--mono"); g.fillStyle = cssVar("--faint");
+  for (let k = 0; k <= 4; k++) { const v = ymin + (k / 4) * (ymax - ymin); const y = Y(v); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(v.toFixed(2), 4, y + 4); }
+  g.fillText("step", w - pad.r - 28, h - 6);
+  for (const s of series) { g.strokeStyle = s.color; g.lineWidth = s.width ?? 1.8; g.beginPath(); s.data.forEach((v, i) => { const x = X(i), y = Y(v); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); }
+}
+function heat(canvas, m, n) { // m: Float32Array n*n row-major
+  const dpr = window.devicePixelRatio || 1; const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const cell = Math.min(w, h) / n; const [r, gg, b] = hexRgb(cssVar("--accent"));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const v = Math.min(1, m[i * n + j]); g.fillStyle = `rgba(${r},${gg},${b},${(0.08 + 0.92 * v).toFixed(3)})`; g.fillRect(j * cell, i * cell, cell + 0.5, cell + 0.5); }
+}
+function hexRgb(hx) { const n = parseInt(hx.replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function drawMask(canvas, causal) { const n = 12, m = new Float32Array(n * n); for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) m[i * n + j] = causal ? (j <= i ? 1 : 0) : 1; heat(canvas, m, n); }
+
+// ---------------------------------------------------------------- run loop helper (rAF, a few steps per frame, cancelable)
+function runner(nSteps, stepFn, onDone) {
+  let i = 0, alive = true, last = performance.now();
+  const tick = () => {
+    if (!alive) return;
+    const t0 = performance.now();
+    while (i < nSteps && performance.now() - t0 < 40) { stepFn(i); i++; }
+    const dt = performance.now() - last; last = performance.now();
+    if (i < nSteps) requestAnimationFrame(tick); else onDone && onDone();
+  };
+  requestAnimationFrame(tick);
+  return () => { alive = false; };
+}
+const $ = (id) => document.getElementById(id);
+// surface uncaught errors in the page (the lab runs on the GPU through WebGL; shape errors otherwise die silently in rAF)
+window.__labErrors = [];
+window.addEventListener("error", (e) => { window.__labErrors.push(String(e.message)); let el = document.getElementById("labErr"); if (!el) { el = document.createElement("div"); el.id = "labErr"; el.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:99;max-width:60ch;padding:8px 12px;border-radius:8px;background:#5a1d1d;color:#fff;font:12px/1.4 monospace"; document.body.appendChild(el); } el.textContent = "error: " + e.message; });
+const fmt = (v) => (v == null || Number.isNaN(v) ? "–" : v.toFixed(3));
+
+// ---------------------------------------------------------------- station 1: data
+let corpusText = STORIES, T = 48;
+function refreshData() {
+  const sel = $("corpusSel").value; $("ownText").style.display = sel === "own" ? "block" : "none";
+  corpusText = sel === "stories" ? STORIES : sel === "arith" ? ARITH : ($("ownText").value || STORIES);
+  T = Number($("ctxSel").value);
+  const wins = windows(corpusText, T);
+  $("dChars").textContent = corpusText.length.toLocaleString(); $("dVocab").textContent = `${V} characters`; $("dWindows").textContent = `${wins.length} of ${T} tokens (stride ${Math.floor(T / 2)})`;
+  const w = wins[0] || []; $("dTokens").innerHTML = w.slice(0, T).map((id, i) => `<span title="id ${id}">${CHARS[id] === " " ? "␣" : CHARS[id] === "\n" ? "↵" : CHARS[id]}<sub style="color:var(--faint)">${id}</sub></span>`).join("");
+}
+["corpusSel", "ctxSel"].forEach((id) => $(id).addEventListener("change", refreshData));
+$("ownText").addEventListener("input", refreshData);
+
+// ---------------------------------------------------------------- station 2: pretrain
+let P = null, ptOpt = null, ptHist = [], ptStop = null, ptProbe = null;
+const uniform = Math.log(V);
+function ptInit() { if (ptStop) ptStop(); if (P) disposeParams(P); P = makeParams(7); ptHist = []; ptOpt = tf.train.adam(Number($("ptLr").value)); $("ptStep").textContent = "0"; $("ptLoss").textContent = "–"; $("ptSample").textContent = "(train first)"; lineChart($("ptChart"), [{ data: [], color: cssVar("--c1") }]); drawAttn(); }
+function drawAttn() {
+  if (!P) return;
+  const probe = enc("the cat sat on the warm step. a bird sang").slice(0, 24);
+  const a = tf.tidy(() => { const x = tf.tensor2d([probe], [1, probe.length], "int32"); const { attn } = forward(P, x, true, true); return attn.slice([0, 0, 0, 0], [1, 1, probe.length, probe.length]).reshape([probe.length, probe.length]).dataSync(); });
+  heat($("ptAttn"), a, probe.length);
+}
+function ptTrain(fromParams, steps, lrFn, mixFn, hist, ui) {
+  const wins = mixFn();
+  let t0 = performance.now(), ms = 0;
+  return runner(steps, (i) => {
+    if (lrFn) ptOpt.learningRate = lrFn(i);
+    const { x, y } = batchFrom(wins(i), 16, rnd);
+    const loss = ptOpt.minimize(() => tf.tidy(() => ceLoss(forward(fromParams, x, true).logits, y)), true, paramList(fromParams));
+    const lv = loss.dataSync()[0]; loss.dispose(); x.dispose(); y.dispose();
+    hist.push(lv); ms = performance.now() - t0; t0 = performance.now();
+    if (i % 5 === 0 || i === steps - 1) ui(i, lv, ms);
+  });
+}
+$("ptRun").onclick = () => {
+  if (!P) ptInit();
+  const steps = Number($("ptSteps").value); ptOpt.learningRate = Number($("ptLr").value);
+  $("ptUni").textContent = uniform.toFixed(3);
+  ptStop = ptTrain(P, steps, null, () => () => windows(STORIES, T), ptHist, (i, lv, ms) => {
+    $("ptStep").textContent = String(ptHist.length); $("ptLoss").textContent = fmt(lv); $("ptMs").textContent = ms.toFixed(0);
+    lineChart($("ptChart"), [{ data: ptHist, color: cssVar("--c1") }, { data: ptHist.map(() => uniform), color: cssVar("--faint"), width: 1 }], { ymin: 0 });
+    if (i % 40 === 0 || i === steps - 1) { drawAttn(); $("ptSample").textContent = "the little " + greedy(P, "the little ", 80); }
+  });
+};
+$("ptReset").onclick = ptInit;
+
+// ---------------------------------------------------------------- station 3: mid-train
+let M = null, mtHist = { a: [], b: [], lr: [] }, mtStop = null;
+function mtInit() { if (mtStop) mtStop(); if (!P) { ptInit(); } if (M) disposeParams(M); M = cloneParams(P); mtHist = { a: [], b: [], lr: [] }; $("mtStep").textContent = "0"; $("mtA").textContent = $("mtB").textContent = $("mtLr").textContent = "–"; $("mtSample").textContent = "(continue training to sample from both domains)"; lineChart($("mtChart"), [{ data: [], color: cssVar("--c1") }]); }
+function evalLoss(p, wins) { return tf.tidy(() => { const { x, y } = batchFrom(wins, 24, rnd); const v = ceLoss(forward(p, x, true).logits, y).dataSync()[0]; return v; }); }
+$("mtRun").onclick = () => {
+  if (!M) mtInit();
+  const steps = Number($("mtSteps").value), mixB = Number($("mtMix").value), cool = $("mtCool").value === "1", lr0 = Number($("ptLr").value);
+  const wa = windows(STORIES, T), wb = windows(ARITH, T);
+  ptOpt = tf.train.adam(lr0);
+  mtStop = ptTrain(M, steps, (i) => (cool ? lr0 * (1 - i / steps) : lr0), () => (i) => (rnd() < mixB ? wb : wa), [], (i, lv) => {
+    const la = evalLoss(M, wa), lb = evalLoss(M, wb), lr = cool ? lr0 * (1 - i / steps) : lr0;
+    mtHist.a.push(la); mtHist.b.push(lb); mtHist.lr.push(lr / lr0 * 2);
+    $("mtStep").textContent = String(i + 1); $("mtA").textContent = fmt(la); $("mtB").textContent = fmt(lb); $("mtLr").textContent = lr.toExponential(1);
+    lineChart($("mtChart"), [{ data: mtHist.a, color: cssVar("--c1") }, { data: mtHist.b, color: cssVar("--c2") }, { data: mtHist.lr, color: cssVar("--faint"), width: 1 }], { ymin: 0 });
+    if (i % 50 === 0 || i === steps - 1) $("mtSample").textContent = "A: the little " + greedy(M, "the little ", 60) + "\nB: 3 + 4 =" + greedy(M, "3 + 4 =", 12);
+  });
+};
+$("mtReset").onclick = mtInit;
+
+// ---------------------------------------------------------------- station 4: post-train (SFT then DPO)
+const packQA = (q, a) => enc(`q: ${q} a: ${a}|`);
+function sftBatch(pairs) { // pad to common length, weight answer tokens only
+  const seqs = pairs.map(([q, a]) => { const ids = packQA(q, a); const start = enc(`q: ${q} a: `).length; return { ids, w: ids.map((_, i) => (i >= start ? 1 : 0)) }; });
+  const L = Math.min(MAXCTX, Math.max(...seqs.map((s) => s.ids.length)));
+  const pad = (arr, v) => arr.slice(0, L).concat(Array(Math.max(0, L - arr.length)).fill(v));
+  return { ids: tf.tensor2d(seqs.map((s) => pad(s.ids, 0)), [seqs.length, L], "int32"), w: tf.tensor2d(seqs.map((s) => pad(s.w, 0)), [seqs.length, L], "float32") };
+}
+let S = null, sftHist = [], sftStop = null, R = null, Dp = null, dpoHist = { l: [], m: [] }, dpoStop = null;
+function sftInit() { if (sftStop) sftStop(); if (!M) mtInit(); if (S) disposeParams(S); S = cloneParams(M); sftHist = []; $("sftStep").textContent = "0"; $("sftLoss").textContent = "–"; $("sftSample").textContent = "(run SFT, then ask)"; lineChart($("sftChart"), [{ data: [], color: cssVar("--c1") }]); }
+$("sftRun").onclick = () => {
+  if (!S) sftInit();
+  const steps = Number($("sftSteps").value); const opt = tf.train.adam(0.003);
+  sftStop = runner(steps, (i) => {
+    const pick = Array.from({ length: 12 }, () => QA[Math.floor(rnd() * QA.length)]);
+    const { ids, w } = sftBatch(pick);
+    const loss = opt.minimize(() => tf.tidy(() => { const { logits } = forward(S, ids, true); const inp = logits.slice([0, 0, 0], [ids.shape[0], ids.shape[1] - 1, V]); return ceLoss(inp, ids.slice([0, 1], [ids.shape[0], ids.shape[1] - 1]), w.slice([0, 1], [ids.shape[0], ids.shape[1] - 1])); }), true, paramList(S));
+    const lv = loss.dataSync()[0]; loss.dispose(); ids.dispose(); w.dispose(); sftHist.push(lv);
+    if (i % 5 === 0 || i === steps - 1) { $("sftStep").textContent = String(sftHist.length); $("sftLoss").textContent = fmt(lv); lineChart($("sftChart"), [{ data: sftHist, color: cssVar("--c1") }], { ymin: 0 }); }
+  });
+};
+$("sftReset").onclick = sftInit;
+const askWith = (p, q) => greedy(p, `q: ${q} a: `, 24).replace("|", "");
+$("sftAsk").onclick = () => { if (!S) return; const q = $("sftQ").value; $("sftSample").textContent = `q: ${q}\na: ${askWith(S, q)}`; };
+function dpoInit() { if (dpoStop) dpoStop(); if (!S) sftInit(); if (R) disposeParams(R); if (Dp) disposeParams(Dp); R = cloneParams(S); Dp = cloneParams(S); dpoHist = { l: [], m: [] }; $("dpoStep").textContent = "0"; $("dpoLoss").textContent = $("dpoMargin").textContent = $("dpoAcc").textContent = "–"; $("dpoSample").textContent = "(run DPO, then ask)"; lineChart($("dpoChart"), [{ data: [], color: cssVar("--c1") }]); }
+$("dpoRun").onclick = () => {
+  if (!Dp) dpoInit();
+  const steps = Number($("dpoSteps").value), beta = Number($("dpoBeta").value); const opt = tf.train.adam(0.001);
+  dpoStop = runner(steps, (i) => {
+    const pick = Array.from({ length: 8 }, () => PREFS[Math.floor(rnd() * PREFS.length)]);
+    const W = sftBatch(pick.map(([q, w]) => [q, w])), Lo = sftBatch(pick.map(([q, , l]) => [q, l]));
+    const refW = tf.tidy(() => seqLogProb(R, W.ids, W.w)), refL = tf.tidy(() => seqLogProb(R, Lo.ids, Lo.w));
+    let marginV = 0, accV = 0;
+    const loss = opt.minimize(() => tf.tidy(() => {
+      const pw = seqLogProb(Dp, W.ids, W.w), pl = seqLogProb(Dp, Lo.ids, Lo.w);
+      const margin = pw.sub(refW).sub(pl.sub(refL)).mul(beta);
+      const md = margin.dataSync(); marginV = md.reduce((a, b) => a + b, 0) / md.length / beta; accV = md.filter((v) => v > 0).length / md.length;
+      return tf.log(tf.sigmoid(margin)).neg().mean();
+    }), true, paramList(Dp));
+    const lv = loss.dataSync()[0]; loss.dispose(); W.ids.dispose(); W.w.dispose(); Lo.ids.dispose(); Lo.w.dispose(); refW.dispose(); refL.dispose();
+    dpoHist.l.push(lv); dpoHist.m.push(marginV);
+    if (i % 5 === 0 || i === steps - 1) { $("dpoStep").textContent = String(dpoHist.l.length); $("dpoLoss").textContent = fmt(lv); $("dpoMargin").textContent = fmt(marginV); $("dpoAcc").textContent = (accV * 100).toFixed(0) + "%"; lineChart($("dpoChart"), [{ data: dpoHist.l, color: cssVar("--c1") }, { data: dpoHist.m, color: cssVar("--c2") }]); }
+  });
+};
+$("dpoReset").onclick = dpoInit;
+$("dpoAsk").onclick = () => { if (!Dp) return; const q = $("dpoQ").value; $("dpoSample").textContent = `q: ${q}\nSFT: ${S ? askWith(S, q) : "–"}\nDPO: ${askWith(Dp, q)}`; };
+for (const sel of ["sftQ", "dpoQ"]) $(sel).innerHTML = QA.map(([q]) => `<option>${q}</option>`).join("") + `<option>what is 8 + 1</option><option>what do dogs say</option>`;
+$("dpoPairs").textContent = PREFS.slice(0, 6).map(([q, w, l]) => `q: ${q}\n  chosen: ${w}\n  rejected: ${l}`).join("\n");
+{ const [q, a] = QA[0]; const ids = packQA(q, a), start = enc(`q: ${q} a: `).length; $("sftMaskViz").innerHTML = ids.map((id, i) => `<span class="${i >= start ? "m" : ""}">${CHARS[id] === " " ? "␣" : CHARS[id]}</span>`).join(""); }
+document.querySelectorAll("[data-pt]").forEach((b) => b.onclick = () => { document.querySelectorAll("[data-pt]").forEach((x) => x.classList.toggle("on", x === b)); $("ptSft").style.display = b.dataset.pt === "sft" ? "block" : "none"; $("ptDpo").style.display = b.dataset.pt === "dpo" ? "block" : "none"; });
+
+// ---------------------------------------------------------------- station 5: encoder + embeddings
+const SENTS = TOPIC_NAMES.flatMap((t, ti) => TOPICS[t].map((s) => ({ s, t: ti })));
+const ET = 40; // encoder window
+let E = null, encHist = { mlm: [], con: [] }, encStop = null, EMB = null;
+function encInit() { if (encStop) encStop(); if (E) disposeParams(E); E = makeParams(31); encHist = { mlm: [], con: [] }; EMB = null; $("encPhase").textContent = "idle"; $("encStep").textContent = "0"; $("encLoss").textContent = "–"; $("encPurity").textContent = "–"; lineChart($("encChart"), [{ data: [], color: cssVar("--c3") }]); drawScatter(); }
+const padTo = (ids, L) => ids.slice(0, L).concat(Array(Math.max(0, L - ids.length)).fill(stoi.get(" ")));
+function embedAll() {
+  return tf.tidy(() => { const x = tf.tensor2d(SENTS.map((o) => padTo(enc(o.s), ET)), [SENTS.length, ET], "int32"); const { h } = forward(E, x, false); const e = h.mean(1); return e.div(e.norm(2, 1, true)).arraySync(); });
+}
+function purity(emb) { let ok = 0; for (let i = 0; i < emb.length; i++) { let best = -1, bj = -1; for (let j = 0; j < emb.length; j++) { if (i === j) continue; const d = emb[i].reduce((a, v, k) => a + v * emb[j][k], 0); if (d > best) { best = d; bj = j; } } if (SENTS[bj].t === SENTS[i].t) ok++; } return ok / emb.length; }
+function pca2(rows) {
+  const n = rows.length, d = rows[0].length; const mean = Array(d).fill(0); rows.forEach((r) => r.forEach((v, k) => mean[k] += v / n));
+  const X = rows.map((r) => r.map((v, k) => v - mean[k]));
+  const power = (excl) => { let v = Array.from({ length: d }, () => Math.random() - 0.5); for (let it = 0; it < 40; it++) { let nv = Array(d).fill(0); for (const x of X) { let dot = x.reduce((a, xv, k) => a + xv * v[k], 0); if (excl) dot -= excl.reduce((a, ev, k) => a + ev * v[k], 0) * x.reduce((a, xv, k) => a + xv * excl[k], 0); x.forEach((xv, k) => nv[k] += xv * dot); } if (excl) { const c = nv.reduce((a, v2, k) => a + v2 * excl[k], 0); nv = nv.map((v2, k) => v2 - c * excl[k]); } const nrm = Math.sqrt(nv.reduce((a, b) => a + b * b, 0)) || 1; v = nv.map((b) => b / nrm); } return v; };
+  const p1 = power(null), p2 = power(p1);
+  return X.map((x) => [x.reduce((a, xv, k) => a + xv * p1[k], 0), x.reduce((a, xv, k) => a + xv * p2[k], 0)]);
+}
+let lastPts = null;
+function drawScatter(assign) {
+  const canvas = $("encScatter"); const dpr = window.devicePixelRatio || 1; const w = canvas.clientWidth, h = canvas.clientHeight; if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  if (!EMB) { g.fillStyle = cssVar("--faint"); g.font = "12px " + cssVar("--mono"); g.fillText("train the encoder to see the space", 16, 24); return; }
+  const pts = pca2(EMB); lastPts = pts; const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]); const mx = Math.max(...xs.map(Math.abs)) || 1, my = Math.max(...ys.map(Math.abs)) || 1;
+  pts.forEach((p, i) => { const x = w / 2 + (p[0] / mx) * (w / 2 - 16), y = h / 2 - (p[1] / my) * (h / 2 - 16); g.fillStyle = cssVar(TOPIC_COLORS[SENTS[i].t]); g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill(); });
+}
+function encRun(phase) {
+  if (!E) encInit();
+  if (encStop) encStop();
+  const steps = Number($("encSteps").value); const opt = tf.train.adam(phase === "mlm" ? 0.006 : 0.003);
+  $("encPhase").textContent = phase === "mlm" ? "masked LM" : "contrastive";
+  const wins = windows(SENTS.map((o) => o.s).join(" ") + " " + STORIES, ET);
+  encStop = runner(steps, (i) => {
+    let lv;
+    if (phase === "mlm") {
+      const B = 24; const xs = [], ys = [], ws = [];
+      for (let b = 0; b < B; b++) { const w = wins[Math.floor(rnd() * wins.length)].slice(0, ET); const x = w.slice(), m = w.map(() => (rnd() < 0.15 ? 1 : 0)); m.forEach((mm, k) => { if (mm) x[k] = MASK_ID; }); xs.push(x); ys.push(w); ws.push(m); }
+      const x = tf.tensor2d(xs, [B, ET], "int32"), y = tf.tensor2d(ys, [B, ET], "int32"), wt = tf.tensor2d(ws, [B, ET], "float32");
+      const loss = opt.minimize(() => tf.tidy(() => ceLoss(forward(E, x, false).logits, y, wt)), true, paramList(E));
+      lv = loss.dataSync()[0]; loss.dispose(); x.dispose(); y.dispose(); wt.dispose(); encHist.mlm.push(lv);
+    } else {
+      // anchor/positive: two different sentences of the same topic; every other pair in the batch is a negative
+      const B = 24, ids = [], pos = [];
+      for (let b = 0; b < B; b++) { const t = Math.floor(rnd() * TOPIC_NAMES.length); const arr = TOPICS[TOPIC_NAMES[t]]; const a = arr[Math.floor(rnd() * arr.length)]; let p = arr[Math.floor(rnd() * arr.length)]; if (p === a) p = arr[(arr.indexOf(a) + 1) % arr.length]; ids.push(padTo(enc(a), ET)); pos.push(padTo(enc(p), ET)); }
+      const xa = tf.tensor2d(ids, [B, ET], "int32"), xp = tf.tensor2d(pos, [B, ET], "int32");
+      const loss = opt.minimize(() => tf.tidy(() => {
+        const ea = forward(E, xa, false).h.mean(1), ep = forward(E, xp, false).h.mean(1);
+        const na = ea.div(ea.norm(2, 1, true)), np = ep.div(ep.norm(2, 1, true));
+        const sim = na.matMul(np, false, true).div(0.1); // [B,B], diagonal = positives
+        const labels = tf.oneHot(tf.range(0, B, 1, "int32"), B).cast("float32");
+        return tf.logSoftmax(sim, -1).mul(labels).sum(-1).neg().mean();
+      }), true, paramList(E));
+      lv = loss.dataSync()[0]; loss.dispose(); xa.dispose(); xp.dispose(); encHist.con.push(lv);
+    }
+    if (i % 5 === 0 || i === steps - 1) {
+      $("encStep").textContent = String(i + 1); $("encLoss").textContent = fmt(lv);
+      lineChart($("encChart"), [{ data: encHist.mlm, color: cssVar("--c3") }, { data: encHist.con, color: cssVar("--c1") }], { ymin: 0 });
+    }
+    if (i % 25 === 0 || i === steps - 1) { EMB = embedAll(); $("encPurity").textContent = (purity(EMB) * 100).toFixed(0) + "%"; drawScatter(); }
+  });
+}
+$("encMlm").onclick = () => encRun("mlm"); $("encCon").onclick = () => encRun("con"); $("encReset").onclick = encInit;
+$("encQ").innerHTML = SENTS.map((o, i) => `<option value="${i}">${o.s}</option>`).join("");
+$("encFind").onclick = () => { if (!EMB) return; const i = Number($("encQ").value); const scores = EMB.map((e, j) => [j, e.reduce((a, v, k) => a + v * EMB[i][k], 0)]).filter(([j]) => j !== i).sort((a, b) => b[1] - a[1]).slice(0, 4); $("encNN").textContent = scores.map(([j, s]) => `${s.toFixed(3)}  ${SENTS[j].s}  [${TOPIC_NAMES[SENTS[j].t]}]`).join("\n"); };
+
+// ---------------------------------------------------------------- station 6: k-means
+let km = null;
+function kmInit() { if (!EMB) { $("kmInertia").textContent = "train station 5 first"; return; } const k = Number($("kmK").value); const cents = []; const used = new Set(); while (cents.length < k) { const i = Math.floor(rnd() * EMB.length); if (!used.has(i)) { used.add(i); cents.push(EMB[i].slice()); } } km = { k, cents, assign: EMB.map(() => -1), iter: 0 }; $("kmIter").textContent = "0"; $("kmMoved").textContent = "–"; kmDraw(); }
+function kmStep() {
+  if (!km) kmInit(); if (!km) return;
+  const { k, cents } = km; let moved = 0, inertia = 0;
+  const assign = EMB.map((e, i) => { let bi = 0, bd = Infinity; for (let c = 0; c < k; c++) { const d = e.reduce((a, v, j) => a + (v - cents[c][j]) ** 2, 0); if (d < bd) { bd = d; bi = c; } } inertia += bd; if (km.assign[i] !== bi) moved++; return bi; });
+  for (let c = 0; c < k; c++) { const members = EMB.filter((_, i) => assign[i] === c); if (!members.length) continue; cents[c] = members[0].map((_, j) => members.reduce((a, m) => a + m[j], 0) / members.length); }
+  km.assign = assign; km.iter++;
+  const counts = Array.from({ length: k }, () => Array(TOPIC_NAMES.length).fill(0)); assign.forEach((c, i) => counts[c][SENTS[i].t]++);
+  const pur = counts.reduce((a, row) => a + Math.max(...row), 0) / EMB.length;
+  $("kmIter").textContent = String(km.iter); $("kmInertia").textContent = inertia.toFixed(2); $("kmPurity").textContent = (pur * 100).toFixed(0) + "%"; $("kmMoved").textContent = String(moved);
+  kmDraw(); return moved;
+}
+function kmDraw() {
+  const canvas = $("kmCanvas"); const dpr = window.devicePixelRatio || 1; const w = canvas.clientWidth, h = canvas.clientHeight; if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  if (!EMB || !km) { g.fillStyle = cssVar("--faint"); g.font = "12px " + cssVar("--mono"); g.fillText("train station 5, then reseed", 16, 24); return; }
+  const pts = lastPts || pca2(EMB); const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]); const mx = Math.max(...xs.map(Math.abs)) || 1, my = Math.max(...ys.map(Math.abs)) || 1;
+  const X = (p) => w / 2 + (p[0] / mx) * (w / 2 - 18), Y = (p) => h / 2 - (p[1] / my) * (h / 2 - 18);
+  pts.forEach((p, i) => { const c = km.assign[i]; g.fillStyle = c >= 0 ? cssVar(TOPIC_COLORS[c % TOPIC_COLORS.length]) : cssVar("--faint"); g.beginPath(); g.arc(X(p), Y(p), 7, 0, Math.PI * 2); g.fill(); g.fillStyle = cssVar(TOPIC_COLORS[SENTS[i].t]); g.beginPath(); g.arc(X(p), Y(p), 2.5, 0, Math.PI * 2); g.fill(); });
+  // centroids: project by nearest members' mean position
+  km.cents.forEach((c, ci) => { const m = pts.filter((_, i) => km.assign[i] === ci); if (!m.length) return; const cx = m.reduce((a, p) => a + X(p), 0) / m.length, cy = m.reduce((a, p) => a + Y(p), 0) / m.length; g.strokeStyle = cssVar(TOPIC_COLORS[ci % TOPIC_COLORS.length]); g.lineWidth = 2.5; g.beginPath(); g.arc(cx, cy, 12, 0, Math.PI * 2); g.stroke(); });
+}
+$("kmStep").onclick = kmStep; $("kmReset").onclick = kmInit; $("kmK").onchange = kmInit;
+$("kmRun").onclick = () => { if (!km) kmInit(); if (!km) return; let guard = 0; const loop = () => { const moved = kmStep(); if (moved > 0 && guard++ < 30) setTimeout(loop, 220); }; loop(); };
+
+// ---------------------------------------------------------------- navigation + boot
+function show(id) { document.querySelectorAll(".station").forEach((s) => s.classList.toggle("on", s.id === "s-" + id)); document.querySelectorAll(".nav a.st").forEach((a) => a.classList.toggle("on", a.dataset.st === id)); if (id === "cluster") kmDraw(); if (id === "encoder") drawScatter(); if (id === "pretrain") drawAttn(); if (id === "paint" && !paintLogits) paintInit(); }
+
+
+// ---------------------------------------------------------------- station 7: paint with code (GRPO with a rendered reward)
+const PW = 24, PK = 6; // canvas side in cells, strokes per program
+const PSLOTS = [2, 8, 8, 4, 4]; // shape, x, y, size, shade  (per stroke)
+const PSIZES = [2, 4, 6, 9], PSHADES = [0.25, 0.5, 0.75, 1.0];
+let paintLogits = null, paintLogits0 = null, paintHist = [], paintBestR = -1, paintBestProg = null, paintStop = null, paintN = 0;
+const paintRef = new Float32Array(PW * PW);
+(function makeRef() { // three soft blobs, deterministic
+  const blobs = [[7, 8, 5, 1.0], [15, 14, 6, 0.7], [9, 17, 3, 0.5]];
+  for (let y = 0; y < PW; y++) for (let x = 0; x < PW; x++) { let v = 0; for (const [bx, by, r, a] of blobs) { const d = Math.hypot(x - bx, y - by); v = Math.max(v, a * Math.max(0, 1 - d / r)); } paintRef[y * PW + x] = v; }
+})();
+function renderProg(prog) { // prog: array of PK strokes [shape,x,y,size,shade] -> Float32Array canvas (0 = white, 1 = black)
+  const c = new Float32Array(PW * PW);
+  for (const [sh, gx, gy, si, sd] of prog) {
+    const cx = gx * 3 + 1.5, cy = gy * 3 + 1.5, r = PSIZES[si] / 2, a = PSHADES[sd];
+    for (let y = 0; y < PW; y++) for (let x = 0; x < PW; x++) {
+      const inside = sh === 0 ? Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= r : Math.abs(x + 0.5 - cx) <= r && Math.abs(y + 0.5 - cy) <= r;
+      if (inside) c[y * PW + x] = Math.min(1, c[y * PW + x] + a * 0.6); // paint accumulates like wet ink
+    }
+  }
+  return c;
+}
+function paintReward(c) {
+  let cov = 0, dot = 0, c2 = 0, ref2 = 0;
+  for (let i = 0; i < c.length; i++) { cov += c[i] > 0.05 ? 1 : 0; dot += c[i] * paintRef[i]; c2 += c[i] ** 2; ref2 += paintRef[i] ** 2; }
+  cov /= c.length;
+  const gate = cov > 0.01 ? 0.05 : 0;                 // not blank
+  const length = 0.05 * Math.min(1, cov / 0.25);       // some coverage (capped, so it cannot be gamed by flooding)
+  const sim = 0.9 * (2 * dot / (c2 + ref2 + 1e-6));    // Dice-style similarity = 1 - ‖c − ref‖² / (‖c‖² + ‖ref‖²), in [0, 1]; dense, punishes flooding
+  return { r: gate + length + sim, blank: gate === 0, cov };
+}
+function paintInit() {
+  if (paintStop) paintStop();
+  paintLogits = []; for (let k = 0; k < PK; k++) paintLogits.push(PSLOTS.map((n) => new Float32Array(n)));
+  paintLogits0 = paintLogits.map((st) => st.map((v) => Float32Array.from(v)));
+  paintHist = []; paintBestR = -1; paintBestProg = null; paintN = 0;
+  $("paintStepN").textContent = "0"; $("paintMean").textContent = "–"; $("paintBest").textContent = "–"; $("paintBlank").textContent = "–"; $("paintKL").textContent = "–";
+  $("paintProg").textContent = "(train to see the best program)"; $("paintGroup").innerHTML = "";
+  drawCells($("paintRef"), paintRef); drawCells($("paintBestC"), new Float32Array(PW * PW)); drawCells($("paintMode"), renderProg(paintMode()));
+  lineChart($("paintChart"), [{ data: [], color: cssVar("--c1") }]);
+}
+const softmax = (v) => { const m = Math.max(...v); const e = Array.from(v, (x) => Math.exp(x - m)); const z = e.reduce((a, b) => a + b, 0); return e.map((x) => x / z); };
+function paintSample() { return paintLogits.map((st) => st.map((v) => { const p = softmax(v); let u = rnd(), i = 0; while (i < p.length - 1 && (u -= p[i]) > 0) i++; return i; })); }
+function paintMode() { return paintLogits.map((st) => st.map((v) => { let b = 0; for (let i = 1; i < v.length; i++) if (v[i] > v[b]) b = i; return b; })); }
+function paintKLnow() { let kl = 0; for (let k = 0; k < PK; k++) for (let j = 0; j < PSLOTS.length; j++) { const p = softmax(paintLogits[k][j]), q = softmax(paintLogits0[k][j]); for (let i = 0; i < p.length; i++) kl += p[i] * Math.log((p[i] + 1e-9) / (q[i] + 1e-9)); } return kl; }
+function paintStepOnce() {
+  const G = Number($("paintG").value), lr = Number($("paintLr").value), beta = Number($("paintBeta").value);
+  const progs = [], rs = [], cans = []; let blanks = 0;
+  for (let g = 0; g < G; g++) { const pr = paintSample(); const c = renderProg(pr); const { r, blank } = paintReward(c); progs.push(pr); rs.push(r); cans.push(c); if (blank) blanks++; if (r > paintBestR) { paintBestR = r; paintBestProg = pr; drawCells($("paintBestC"), c); } }
+  const mean = rs.reduce((a, b) => a + b, 0) / G, std = Math.sqrt(rs.reduce((a, b) => a + (b - mean) ** 2, 0) / G) + 1e-6;
+  const adv = rs.map((r) => (r - mean) / std);
+  // policy gradient on the factorized categorical policy: d log p(a) / d logits = onehot(a) - softmax(logits); plus a KL leash to the start
+  for (let k = 0; k < PK; k++) for (let j = 0; j < PSLOTS.length; j++) {
+    const v = paintLogits[k][j], p = softmax(v), q = softmax(paintLogits0[k][j]); const grad = new Float32Array(v.length);
+    for (let g = 0; g < G; g++) { const a = progs[g][k][j]; for (let i = 0; i < v.length; i++) grad[i] += (adv[g] / G) * ((i === a ? 1 : 0) - p[i]); }
+    for (let i = 0; i < v.length; i++) { let dkl = 0; for (let m = 0; m < v.length; m++) dkl += p[m] * ((i === m ? 1 : 0) - p[i]) * (Math.log((p[m] + 1e-9) / (q[m] + 1e-9)) + 1); v[i] += lr * (grad[i] - beta * dkl); }
+  }
+  paintN++; paintHist.push(mean);
+  const kl = paintKLnow();
+  $("paintStepN").textContent = String(paintN); $("paintMean").textContent = mean.toFixed(3); $("paintBest").textContent = paintBestR.toFixed(3); $("paintBlank").textContent = (blanks / G).toFixed(2); $("paintKL").textContent = kl.toFixed(2);
+  const grp = $("paintGroup"); grp.innerHTML = ""; const bi = rs.indexOf(Math.max(...rs));
+  cans.forEach((c, g) => { const d = document.createElement("div"); d.className = "c" + (g === bi ? " best" : ""); const cv = document.createElement("canvas"); cv.width = cv.height = PW; d.appendChild(cv); const l = document.createElement("span"); l.textContent = rs[g].toFixed(2) + (adv[g] >= 0 ? " ↑" : " ↓"); d.appendChild(l); grp.appendChild(d); drawCells(cv, c, true); });
+  drawCells($("paintMode"), renderProg(paintMode()));
+  lineChart($("paintChart"), [{ data: paintHist, color: cssVar("--c1") }], { ymin: 0, ymax: 1 });
+  $("paintProg").textContent = "best program (reward " + paintBestR.toFixed(3) + "):\n" + paintBestProg.map(([sh, x, y, si, sd]) => `${sh === 0 ? "disc" : "square"} at (${x},${y}) size ${PSIZES[si]} shade ${PSHADES[sd]}`).join("\n");
+  return mean;
+}
+function drawCells(canvas, cells, raw = false) {
+  const g = canvas.getContext("2d"); const n = PW; const w = canvas.width, h = canvas.height; const img = g.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const v = cells[Math.floor(y * n / h) * n + Math.floor(x * n / w)]; const px = Math.round(255 * (1 - v)); const o = (y * w + x) * 4; img.data[o] = px; img.data[o + 1] = px; img.data[o + 2] = px; img.data[o + 3] = 255; }
+  g.putImageData(img, 0, 0);
+}
+$("paintStep").onclick = () => { if (!paintLogits) paintInit(); paintStepOnce(); };
+$("paintReset").onclick = paintInit;
+$("paintRun").onclick = () => { if (!paintLogits) paintInit(); if (paintStop) paintStop(); const steps = Number($("paintSteps").value); paintStop = runner(steps, () => paintStepOnce()); };
+
+// ---------------------------------------------------------------- control surface (Cortex embeds this page and its agent tools drive it)
+const STATION_RUN = { pretrain: "ptRun", midtrain: "mtRun", sft: "sftRun", dpo: "dpoRun", encoder: "encMlm", contrastive: "encCon", cluster: "kmRun", paint: "paintRun" };
+const STATION_STEPS = { pretrain: "ptSteps", midtrain: "mtSteps", sft: "sftSteps", dpo: "dpoSteps", encoder: "encSteps", contrastive: "encSteps", paint: "paintSteps" };
+function labStatus() {
+  const txt = (id) => { const el = document.getElementById(id); return el ? el.textContent : null; };
+  return {
+    backend: tf.getBackend(), station: location.hash.slice(1) || "overview",
+    pretrain: { step: Number(txt("ptStep") || 0), loss: ptHist.at(-1) ?? null, uniform: uniform, sample: txt("ptSample") },
+    midtrain: { step: mtHist.a.length, loss_a: mtHist.a.at(-1) ?? null, loss_b: mtHist.b.at(-1) ?? null },
+    sft: { step: sftHist.length, loss: sftHist.at(-1) ?? null, sample: txt("sftSample") },
+    dpo: { step: dpoHist.l.length, loss: dpoHist.l.at(-1) ?? null, margin: dpoHist.m.at(-1) ?? null, sample: txt("dpoSample") },
+    encoder: { purity: txt("encPurity"), nn: txt("encNN") },
+    cluster: { inertia: txt("kmInertia"), purity: txt("kmPurity") },
+    paint: { step: paintN, reward_mean: paintHist.at(-1) ?? null, best: paintBestR > 0 ? paintBestR : null, blank_rate: txt("paintBlank"), kl: txt("paintKL"), best_program: paintBestProg },
+    errors: window.__labErrors,
+  };
+}
+function labRun(station, steps) {
+  const btn = document.getElementById(STATION_RUN[station]);
+  if (!btn) return { ok: false, error: "unknown station " + station + "; use " + Object.keys(STATION_RUN).join("|") };
+  const stepsEl = document.getElementById(STATION_STEPS[station]);
+  if (stepsEl && steps) {
+    if (stepsEl.tagName === "SELECT" && ![...stepsEl.options].some((o) => o.value === String(steps))) { const o = document.createElement("option"); o.value = o.textContent = String(steps); stepsEl.appendChild(o); }
+    stepsEl.value = String(steps);
+  }
+  const target = { pretrain: "pretrain", midtrain: "midtrain", sft: "posttrain", dpo: "posttrain", encoder: "encoder", contrastive: "encoder", cluster: "cluster", paint: "paint" }[station];
+  if (location.hash.slice(1) !== target) { location.hash = target; }
+  if (station === "dpo") document.querySelector('[data-pt="dpo"]')?.click();
+  if (station === "sft") document.querySelector('[data-pt="sft"]')?.click();
+  btn.click();
+  return { ok: true, station, steps: stepsEl ? Number(stepsEl.value) : null };
+}
+window.addEventListener("message", (e) => {
+  const m = e.data || {};
+  if (m.type === "lab:run") e.source?.postMessage({ type: "lab:ack", id: m.id, ...labRun(m.station, m.steps) }, "*");
+  if (m.type === "lab:status") e.source?.postMessage({ type: "lab:status", id: m.id, status: labStatus() }, "*");
+  if (m.type === "lab:show") { location.hash = m.station; e.source?.postMessage({ type: "lab:ack", id: m.id, ok: true }, "*"); }
+});
+window.labRun = labRun; window.labStatus = labStatus;
+window.addEventListener("hashchange", () => show(location.hash.slice(1) || "overview"));
+document.querySelectorAll(".flow a, .nav a.st").forEach((a) => a.addEventListener("click", () => setTimeout(() => window.scrollTo({ top: 0 }), 0)));
+window.addEventListener("resize", () => { drawMask($("maskCausal"), true); drawMask($("maskFull"), false); });
+
+(async () => {
+  const qs = new URLSearchParams(location.search);
+  const wantBackend = qs.get("backend") || "webgl";
+  try { await tf.setBackend(wantBackend); } catch { await tf.setBackend("cpu"); }
+  await tf.ready();
+  document.querySelectorAll("[data-backend]").forEach((el) => (el.textContent = tf.getBackend()));
+  $("backend").textContent = tf.getBackend(); $("gpu").textContent = tf.getBackend() === "webgl" ? "GPU via WebGL" : "CPU fallback (slower)";
+  const tmp = makeParams(1); $("nparams").textContent = countParams(tmp).toLocaleString(); disposeParams(tmp);
+  refreshData(); drawMask($("maskCausal"), true); drawMask($("maskFull"), false);
+  show(location.hash.slice(1) || "overview");
+  const auto = qs.get("autorun"); // e.g. ?autorun=pretrain:40
+  if (auto) { const [st, n] = auto.split(":"); setTimeout(() => labRun(st, Number(n) || undefined), 300); }
+  if (qs.get("embed") === "1") document.body.classList.add("embed");
+})();
+})();
+</script>

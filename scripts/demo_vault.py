@@ -51,6 +51,14 @@ def seed() -> None:
     if vault.counts()["papers"] > 0:
         return
     (vault.VAULT / "topics.json").write_text(json.dumps(TOPICS, indent=1))
+    # A real training run (pretrain_nano --smoke on a laptop CPU) so the Lab's runs tab has something honest to show.
+    import shutil
+    demo_runs = Path(__file__).resolve().parent.parent / "lab" / "demo_runs"
+    if demo_runs.exists():
+        for d in demo_runs.iterdir():
+            dst = vault.VAULT / "runs" / d.name
+            if d.is_dir() and not dst.exists():
+                shutil.copytree(d, dst)
     for title, status, ptype, verdict, nxt in PROJECTS:
         vault.create_project(title, "", status=status, type=ptype, verdict=verdict, next_action=nxt, topics=[])
     vault.create_note("Why probes scale", "permanent", NOTE, ["interpretability", "safety"])

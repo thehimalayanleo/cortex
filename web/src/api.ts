@@ -22,6 +22,30 @@ import type {
   Topic,
 } from "./types";
 
+export interface LabExecutors {
+  local: { available: boolean; note: string };
+  ssh: { available: boolean; host: string | null; note: string };
+  modal: { available: boolean; note: string };
+  demo: boolean;
+}
+export interface LabRecipe { name: string; file: string; doc: string }
+export type PlanCol = "todo" | "doing" | "done";
+export interface PlanCard { id: string; chapter: number; kind: "read" | "station" | "build" | "recipe" | "quiz"; title: string; col: PlanCol; note?: string; station?: string; recipe?: string; done_at?: string; comment?: string }
+export interface LabPlan { columns: PlanCol[]; cards: PlanCard[]; done: number; total: number; xp: number; xp_total: number; level: number; level_name: string; next_level_xp: number; streak: number; done_today: number; xp_by_kind: Record<string, number> }
+export interface GpuStatus {
+  host: string | null; reachable: boolean; ready: boolean; message?: string; busy?: boolean; torch?: string; cuda?: boolean; python?: string;
+  gpu?: { name: string; memory_total: string; memory_used: string; utilization: string };
+}
+export type GpuSetupEvent = { type: "log"; lines: string[] } | { type: "status"; status: "done" | "failed"; exit: number; gpu: GpuStatus | null } | { type: "error"; message: string };
+export interface LabChapter { slug: string; file: string; title?: string; chapter?: number; station?: string; recipe?: string; reading_time?: string }
+export interface LabRun {
+  id: string; recipe: string; args: string; executor: string;
+  status: "queued" | "running" | "stopping" | "done" | "failed" | "stopped";
+  started: string; ended: string | null; exit: number | null; error?: string;
+  last?: Record<string, number> | null;
+}
+export interface LabRunDetail extends LabRun { log: string[]; log_lines: number; metrics: Record<string, number>[]; result: Record<string, unknown> | null }
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -184,6 +208,22 @@ export const api = {
   },
 
   models: () => request<ModelInfo[]>("/models"),
+
+  lab: {
+    executors: () => request<LabExecutors>("/lab/executors"),
+    recipes: () => request<LabRecipe[]>("/lab/recipes"),
+    chapters: () => request<LabChapter[]>("/lab/chapters"),
+    runs: (limit = 50) => request<LabRun[]>(`/lab/runs${qs({ limit })}`),
+    run: (id: string, tail = 200) => request<LabRunDetail>(`/lab/runs/${encodeURIComponent(id)}${qs({ tail })}`),
+    start: (data: { recipe: string; args?: string; executor?: string }) => request<LabRun>("/lab/runs", { method: "POST", body: JSON.stringify(data) }),
+    stop: (id: string) => request<{ ok: boolean }>(`/lab/runs/${encodeURIComponent(id)}/stop`, { method: "POST" }),
+    remove: (id: string) => request<{ ok: boolean }>(`/lab/runs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    eventsUrl: (id: string) => `${BASE}/lab/runs/${encodeURIComponent(id)}/events`,
+    gpu: () => request<GpuStatus>("/lab/gpu"),
+    plan: () => request<LabPlan>("/lab/plan"),
+    planMove: (id: string, col: PlanCol, comment?: string) => request<LabPlan>("/lab/plan/move", { method: "POST", body: JSON.stringify({ id, col, comment }) }),
+    gpuSetup: (onEvent: (e: GpuSetupEvent) => void, signal?: AbortSignal) => stream<GpuSetupEvent>("/lab/gpu/setup", {}, onEvent, signal),
+  },
 
   agents: {
     list: () => request<AgentInfo[]>("/agents"),

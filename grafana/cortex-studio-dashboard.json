@@ -1,0 +1,56 @@
+{
+  "dashboard": {
+    "uid": "cortex-studio",
+    "title": "Cortex Studio · takes, critics, verdicts",
+    "tags": ["cortex", "agentic-cinema"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "refresh": "10s",
+    "time": {"from": "now-6h", "to": "now"},
+    "templating": {"list": [
+      {"name": "shot", "type": "query", "datasource": {"type": "prometheus", "uid": "${DS_PROM}"}, "query": "label_values(cortex_run_identity, shot)", "includeAll": true, "multi": true, "current": {"text": "All", "value": "$__all"}},
+      {"name": "DS_PROM", "type": "datasource", "query": "prometheus", "current": {"text": "grafanacloud-prom", "value": "grafanacloud-prom"}},
+      {"name": "DS_LOKI", "type": "datasource", "query": "loki", "current": {"text": "grafanacloud-logs", "value": "grafanacloud-logs"}}
+    ]},
+    "panels": [
+      {"id": 1, "type": "stat", "title": "Takes rendered (6h)", "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "targets": [{"expr": "count(count by (run) (cortex_run_identity{recipe=\"cinema_render\"}))", "refId": "A"}]},
+      {"id": 2, "type": "stat", "title": "Identity min (latest take)", "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "fieldConfig": {"defaults": {"unit": "none", "decimals": 3, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.8}, {"color": "green", "value": 0.85}]}}},
+       "targets": [{"expr": "min(cortex_run_identity_min{recipe=\"cinema_render\", shot=~\"$shot\"})", "refId": "A"}]},
+      {"id": 3, "type": "stat", "title": "Flicker mean (latest take)", "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "fieldConfig": {"defaults": {"decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 6}, {"color": "red", "value": 10}]}}},
+       "targets": [{"expr": "avg(cortex_run_flicker_mean{recipe=\"cinema_render\", shot=~\"$shot\"})", "refId": "A"}]},
+      {"id": 4, "type": "stat", "title": "Render seconds (latest)", "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "fieldConfig": {"defaults": {"unit": "s", "decimals": 0}},
+       "targets": [{"expr": "max(cortex_run_gen_s{recipe=\"cinema_render\", shot=~\"$shot\"})", "refId": "A"}]},
+      {"id": 5, "type": "timeseries", "title": "Identity to the hero, per frame of each take", "gridPos": {"x": 0, "y": 4, "w": 12, "h": 9},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "fieldConfig": {"defaults": {"min": 0.5, "max": 1, "custom": {"lineWidth": 2, "drawStyle": "line"}}},
+       "targets": [{"expr": "cortex_run_identity{recipe=\"cinema_render\", shot=~\"$shot\"}", "legendFormat": "{{shot}} · {{run}}", "refId": "A"}]},
+      {"id": 6, "type": "timeseries", "title": "Flicker between consecutive frames", "gridPos": {"x": 12, "y": 4, "w": 12, "h": 9},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "targets": [{"expr": "cortex_run_flicker{recipe=\"cinema_render\", shot=~\"$shot\"}", "legendFormat": "{{shot}} · {{run}}", "refId": "A"}]},
+      {"id": 7, "type": "table", "title": "Takes: keep or reshoot (identity_min ≥ 0.85·first and flicker_max ≤ 3·mean)", "gridPos": {"x": 0, "y": 13, "w": 12, "h": 8},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "targets": [
+         {"expr": "max by (run, shot) (cortex_run_identity_min{recipe=\"cinema_render\"})", "format": "table", "instant": true, "refId": "A"},
+         {"expr": "max by (run, shot) (cortex_run_flicker_max{recipe=\"cinema_render\"})", "format": "table", "instant": true, "refId": "B"}
+       ],
+       "transformations": [{"id": "merge"}, {"id": "organize", "options": {"renameByName": {"Value #A": "identity_min", "Value #B": "flicker_max"}, "excludeByName": {"Time": true}}}]},
+      {"id": 8, "type": "logs", "title": "Render and critic log (Loki)", "gridPos": {"x": 12, "y": 13, "w": 12, "h": 8},
+       "datasource": {"type": "loki", "uid": "${DS_LOKI}"},
+       "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending"},
+       "targets": [{"expr": "{app=\"cortex\", recipe=\"cinema_render\"}", "refId": "A"}]},
+      {"id": 9, "type": "timeseries", "title": "Character builds: identity of each hero-set candidate", "gridPos": {"x": 0, "y": 21, "w": 24, "h": 7},
+       "datasource": {"type": "prometheus", "uid": "${DS_PROM}"},
+       "targets": [{"expr": "cortex_run_dino_crop{recipe=\"cinema_character\"}", "legendFormat": "{{run}}", "refId": "A"}]}
+    ]
+  },
+  "overwrite": true,
+  "message": "cortex studio dashboard"
+}

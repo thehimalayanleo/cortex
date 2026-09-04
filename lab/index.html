@@ -1100,7 +1100,7 @@ window.addEventListener("resize", () => { drawMask($("maskCausal"), true); drawM
   refreshData(); drawMask($("maskCausal"), true); drawMask($("maskFull"), false);
   show(location.hash.slice(1) || "overview");
   const auto = qs.get("autorun"); // e.g. ?autorun=pretrain:40
-  if (auto) { const [st, n] = auto.split(":"); setTimeout(() => labRun(st, Number(n) || undefined), 300); }
+  if (auto) auto.split(",").forEach((spec, i) => { const [st, n] = spec.split(":"); setTimeout(() => labRun(st, Number(n) || undefined), 300 + i * 8000); }); // e.g. ?autorun=pretrain:20,moe:40
   if (qs.get("embed") === "1") document.body.classList.add("embed");
 })();
 })();

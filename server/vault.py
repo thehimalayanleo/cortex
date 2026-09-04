@@ -401,10 +401,16 @@ def append_chat(channel: str, msg: dict) -> None:
         f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
 
-def clear_chat(channel: str) -> None:
+def clear_chat(channel: str) -> str | None:
+    """Start a fresh chat: the old log is archived under chats/archive/<channel>-<timestamp>.jsonl, never deleted."""
     p = chat_path(channel)
-    if p.exists():
-        p.unlink()
+    if not p.exists():
+        return None
+    archive = p.parent / "archive"
+    archive.mkdir(exist_ok=True)
+    dst = archive / f"{channel}-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
+    p.rename(dst)
+    return str(dst)
 
 
 # ---------------------------------------------------------------- search index (FTS5)

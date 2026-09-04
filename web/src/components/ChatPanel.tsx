@@ -3,7 +3,7 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { api, errorMessage } from "../api";
 import type { AgentId, AgentInfo, ChatMessage, ModelInfo, ToolTrace } from "../types";
 import { useAsync, useLocalStorage } from "../lib/hooks";
-import { emitCommand } from "../lib/events";
+import { emitCommand, onCommand } from "../lib/events";
 import { navigate, parseCortexLink, parseHash } from "../lib/router";
 import { clock, parseDate } from "../lib/format";
 import { MarkdownPreview, handleCortexClick } from "./MarkdownPreview";
@@ -251,13 +251,18 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
     streaming?.ac.abort();
   };
 
+  useEffect(() => onCommand("new-chat", () => void clearChannel()));
+  // "New chat": the old thread is archived on disk (chats/archive), so no confirm is needed.
   const clearChannel = async () => {
-    if (!window.confirm(`Clear the chat history for ${spaceName}?`)) return;
+    if (streaming) stop();
     try {
       await api.chat.clear(channel);
       setItems([]);
+      setDraft("");
+      if (items.length) toast("Previous chat archived");
+      composerRef.current?.focus();
     } catch (e) {
-      toast(`Clear failed: ${errorMessage(e)}`, "error");
+      toast(`New chat failed: ${errorMessage(e)}`, "error");
     }
   };
 
@@ -336,6 +341,9 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
       <div className="chat-head">
         <div className="top">
           <h2 title={space === "all" ? "Chat across all papers" : `Chat in this space (${space})`}>{panelTab === "agent" ? "Agent ledger" : spaceName}</h2>
+          <button className="icon-btn" onClick={() => void clearChannel()} title="New chat (the old one is archived) · Cmd+Shift+N" aria-label="New chat">
+            <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>+</span>
+          </button>
           <Popover
             align="right"
             render={(open, toggle) => (
@@ -367,7 +375,7 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
                 {canHand && <div className="menu-hint">Uses the draft, or the last reply, as the task</div>}
                 <div className="menu-sep" />
                 <button className="menu-item" onClick={() => { close(); void clearChannel(); }} disabled={items.length === 0}>
-                  Clear history
+                  New chat (archive this one)
                 </button>
                 <button className="menu-item" aria-pressed={panelTab === "agent"} onClick={() => { setPanelTab(panelTab === "agent" ? "chat" : "agent"); close(); }}>
                   <span className="check">{panelTab === "agent" ? "✓" : ""}</span>

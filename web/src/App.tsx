@@ -203,6 +203,9 @@ function Shell() {
       if (k === "k") {
         e.preventDefault();
         setPalette(true);
+      } else if (k === "n" && e.shiftKey) {
+        e.preventDefault();
+        emitCommand("new-chat");
       } else if (k === "n" && !e.shiftKey) {
         // Note: browsers may reserve Cmd+N; Ctrl+N and the palette path always work.
         e.preventDefault();

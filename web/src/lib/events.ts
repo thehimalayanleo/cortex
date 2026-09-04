@@ -1,5 +1,5 @@
 // Tiny command bus for app-wide keyboard commands and vault-change notifications.
-export type Command = "save" | "new-note" | "palette" | "toggle-chat" | "vault-changed";
+export type Command = "save" | "new-note" | "palette" | "toggle-chat" | "vault-changed" | "new-chat";
 
 type Handler = () => void;
 const handlers = new Map<Command, Set<Handler>>();

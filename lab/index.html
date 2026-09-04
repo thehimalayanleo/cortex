@@ -63,6 +63,7 @@ canvas.chart{width:100%;height:190px;display:block;background:var(--panel-2);bor
 canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);border-radius:10px}
 .moe-usage{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin:8px 0;font:11.5px var(--mono);color:var(--muted)}.moe-usage .bars{display:flex;gap:4px;height:22px}.moe-usage .bars span{flex:1;background:var(--panel-2);border-radius:4px;position:relative;overflow:hidden}.moe-usage .bars span i{position:absolute;left:0;bottom:0;width:100%;background:var(--accent);opacity:.85}.moe-usage .bars span b{position:absolute;left:0;right:0;top:3px;text-align:center;font:10px var(--mono);color:var(--ink);font-weight:500}
 .card.start{margin:12px 0 18px;border-color:var(--accent)}.card.start ol{margin:6px 0 0 18px;padding:0}.card.start li{margin:6px 0;max-width:80ch}
+.card.wide{grid-column:1/-1}
 .tbl{width:100%;border-collapse:collapse;font:12.5px var(--mono);margin:8px 0}.tbl td,.tbl th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right}.tbl td:first-child,.tbl th:first-child{text-align:left;color:var(--muted)}.tbl tr.total td{color:var(--ink);font-weight:600}
 .controls input[type=number],.controls input[type=text]{font:inherit;color:inherit;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
 .paint-row{display:flex;gap:14px;margin:6px 0 10px}.paint-cell{display:flex;flex-direction:column;align-items:center;gap:4px;font:11px var(--mono);color:var(--faint)}.paint-cell canvas{border:1px solid var(--line);border-radius:6px;image-rendering:pixelated;background:#fff}
@@ -538,6 +539,19 @@ tinystories_tokenized = tokenized(
           </div>
           <p class="note">The logit lens applies the final LayerNorm and the tied unembedding to the residual stream after each layer. Early layers guess frequent characters; the last layer's guess is the model's actual output. Lab 11 has the shapes; recipes/inspect_model.py does the same for a real Hugging Face model on the 5090.</p>
         </div>
+        <div class="card wide">
+          <h3>Embedding models: the same block, read bidirectionally, then pooled</h3>
+          <p>An embedding model is a transformer with no causal mask and no next-token head. Tokens go in, every layer sees the whole sentence, and one vector comes out through a pooling rule (the [CLS] token, the mean over tokens, or the last token for decoder-based models), then L2-normalised so cosine is a dot product. Pick a model to draw it to scale and to load its shapes into the calculator.</p>
+          <div class="controls">
+            <label>model <select id="emPreset"></select></label>
+            <button type="button" id="emLoad">Load into calculator</button>
+            <label>text <input id="emText" type="text" value="the quick brown fox" style="width:200px"></label>
+          </div>
+          <svg id="emDiagram" viewBox="0 0 980 300" width="100%" style="max-width:980px;display:block;margin:6px 0 10px"></svg>
+          <p class="note" id="emNote"></p>
+          <table class="tbl" id="emTable"></table>
+          <p class="note">Sizes are from the models' published configs (layers, hidden width, heads, MLP width, vocabulary, context, pooling, output dims); parameter counts are computed here with the calculator's formulas, so they agree with model cards to within the pooler and bias terms. OpenAI's text-embedding-3 models are listed for their output dims only; their architecture is not public. Lab 07 covers the training (masked LM, then contrastive), Lab 08 what to do with the vectors.</p>
+        </div>
       </div>
     </section>
 
@@ -947,7 +961,7 @@ $("kmStep").onclick = kmStep; $("kmReset").onclick = kmInit; $("kmK").onchange =
 $("kmRun").onclick = () => { if (!km) kmInit(); if (!km) return; let guard = 0; const loop = () => { const moved = kmStep(); if (moved > 0 && guard++ < 30) setTimeout(loop, 220); }; loop(); };
 
 // ---------------------------------------------------------------- navigation + boot
-function show(id) { document.querySelectorAll(".station").forEach((s) => s.classList.toggle("on", s.id === "s-" + id)); document.querySelectorAll(".nav a.st").forEach((a) => a.classList.toggle("on", a.dataset.st === id)); if (id === "cluster") kmDraw(); if (id === "encoder") drawScatter(); if (id === "pretrain") drawAttn(); if (id === "paint" && !paintLogits) paintInit(); if (id === "moe" && !MOE && P) moeInit(); if (id === "arch") { arCalc(); if (P) arProbe(); } }
+function show(id) { document.querySelectorAll(".station").forEach((s) => s.classList.toggle("on", s.id === "s-" + id)); document.querySelectorAll(".nav a.st").forEach((a) => a.classList.toggle("on", a.dataset.st === id)); if (id === "cluster") kmDraw(); if (id === "encoder") drawScatter(); if (id === "pretrain") drawAttn(); if (id === "paint" && !paintLogits) paintInit(); if (id === "moe" && !MOE && P) moeInit(); if (id === "arch") { arCalc(); if (P) arProbe(); const em = document.getElementById("emPreset"); if (em) emDraw(EM_PRESETS.find((m) => m.id === em.value)); } }
 
 
 // ---------------------------------------------------------------- station 7: paint with code (GRPO with a rendered reward)
@@ -1216,6 +1230,86 @@ $("arProbe").onclick = arProbe;
   box.addEventListener("click", (e) => { const b = e.target.closest(".hit"); if (b) go(hits[Number(b.dataset.i)]); });
   document.addEventListener("click", (e) => { if (!e.target.closest(".labsearch")) box.hidden = true; });
   window.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && !e.shiftKey && document.body.classList.contains("embed") === false) { e.preventDefault(); q.focus(); q.select(); } });
+})();
+
+
+// ---------------------------------------------------------------- embedding model presets and diagram (station 10)
+const EM_PRESETS = [
+  // name, family, L, D, H, F, gated, vocab, ctx, pooling, dim, positions, notes
+  { id: "minilm", name: "all-MiniLM-L6-v2", family: "BERT (MiniLM)", L: 6, D: 384, H: 12, F: 1536, G: 0, V: 30522, ctx: 512, pool: "mean", dim: 384, pos: "learned", note: "the small default: 22M params, trained on 1B sentence pairs" },
+  { id: "bge-s", name: "bge-small-en-v1.5", family: "BERT", L: 12, D: 384, H: 12, F: 1536, G: 0, V: 30522, ctx: 512, pool: "cls", dim: 384, pos: "learned", note: "BAAI; RetroMAE pretraining, then contrastive with hard negatives; [CLS] pooling" },
+  { id: "bge-b", name: "bge-base-en-v1.5", family: "BERT", L: 12, D: 768, H: 12, F: 3072, G: 0, V: 30522, ctx: 512, pool: "cls", dim: 768, pos: "learned", note: "BERT-base shape; the workhorse" },
+  { id: "bge-l", name: "bge-large-en-v1.5", family: "BERT", L: 24, D: 1024, H: 16, F: 4096, G: 0, V: 30522, ctx: 512, pool: "cls", dim: 1024, pos: "learned", note: "BERT-large shape" },
+  { id: "bge-m3", name: "bge-m3", family: "XLM-RoBERTa-large", L: 24, D: 1024, H: 16, F: 4096, G: 0, V: 250002, ctx: 8192, pool: "cls (+ sparse + multi-vector)", dim: 1024, pos: "learned", note: "multilingual; three outputs from one pass: dense CLS vector, sparse lexical weights, ColBERT-style per-token vectors" },
+  { id: "e5-b", name: "e5-base-v2", family: "BERT", L: 12, D: 768, H: 12, F: 3072, G: 0, V: 30522, ctx: 512, pool: "mean", dim: 768, pos: "learned", note: "Microsoft; needs the prefixes 'query: ' and 'passage: '" },
+  { id: "e5-l", name: "e5-large-v2", family: "BERT", L: 24, D: 1024, H: 16, F: 4096, G: 0, V: 30522, ctx: 512, pool: "mean", dim: 1024, pos: "learned", note: "same recipe, large shape" },
+  { id: "gte-b", name: "gte-base (thenlper)", family: "BERT", L: 12, D: 768, H: 12, F: 3072, G: 0, V: 30522, ctx: 512, pool: "mean", dim: 768, pos: "learned", note: "Alibaba; multi-stage contrastive on 800M pairs" },
+  { id: "nomic", name: "nomic-embed-text-v1.5", family: "BERT + RoPE + SwiGLU", L: 12, D: 768, H: 12, F: 3072, G: 1, V: 30528, ctx: 8192, pool: "mean", dim: 768, pos: "rope", note: "137M; long context via RoPE scaling; Matryoshka dims 64 to 768; prefixes search_query / search_document" },
+  { id: "qwen3-emb", name: "Qwen3-Embedding-0.6B", family: "Qwen3 decoder", L: 28, D: 1024, H: 16, KV: 8, F: 3072, G: 1, V: 151669, ctx: 32768, pool: "last token", dim: 1024, pos: "rope", causal: true, note: "a decoder used as an encoder: causal attention kept, the last token's hidden state is the embedding; instruction-aware" },
+  { id: "oai-s", name: "text-embedding-3-small (OpenAI)", family: "undisclosed", L: null, D: null, H: null, F: null, G: 0, V: null, ctx: 8191, pool: "?", dim: 1536, pos: "?", note: "architecture not public; supports shortening the vector (Matryoshka-style)" },
+  { id: "oai-l", name: "text-embedding-3-large (OpenAI)", family: "undisclosed", L: null, D: null, H: null, F: null, G: 0, V: null, ctx: 8191, pool: "?", dim: 3072, pos: "?", note: "architecture not public" },
+];
+function emParams(m) {
+  if (!m.L) return null;
+  const hd = m.D / m.H, kv = m.KV || m.H;
+  const attn = m.D * m.D + 2 * m.D * kv * hd + m.D * m.D;
+  const mlp = (m.G ? 3 : 2) * m.D * m.F;
+  const norms = 2 * m.D;
+  const embed = m.V * m.D + (m.pos === "learned" ? m.ctx * m.D : 0);
+  const pooler = m.pool === "cls" ? m.D * m.D : 0;
+  return { attn, mlp, per_layer: attn + mlp + norms, embed, pooler, total: m.L * (attn + mlp + norms) + embed + pooler + m.D };
+}
+function emDraw(m) {
+  const svg = $("emDiagram"); const acc = cssVar("--accent") || "#4db39d", ink = cssVar("--ink") || "#e4eae6", muted = cssVar("--muted") || "#9aa", line = cssVar("--line") || "#333", panel = cssVar("--panel-2") || "#1a1f1c";
+  const words = ($("emText").value || "the quick brown fox").trim().split(/\s+/).slice(0, 5);
+  const toks = m.pool === "cls" || m.pool.startsWith("cls") ? ["[CLS]", ...words, "[SEP]"] : (m.causal ? [...words, "<eos>"] : ["[CLS]", ...words, "[SEP]"]);
+  const L = m.L || 12, D = m.D || 768;
+  const box = (x, y, w, h, label, sub, fill) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${fill || panel}" stroke="${line}"/><text x="${x + w / 2}" y="${y + h / 2 - (sub ? 4 : -4)}" text-anchor="middle" font-size="12" font-family="IBM Plex Sans, sans-serif" fill="${ink}">${label}</text>${sub ? `<text x="${x + w / 2}" y="${y + h / 2 + 12}" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" fill="${muted}">${sub}</text>` : ""}`;
+  const arrow = (x1, y, x2) => `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${muted}" stroke-width="1.5" marker-end="url(#emArr)"/>`;
+  let out = `<defs><marker id="emArr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="${muted}"/></marker></defs>`;
+  // tokens column
+  const tx = 10, ty = 40, th = 22;
+  toks.forEach((t, i) => { out += box(tx, ty + i * (th + 6), 90, th, t, null, i === 0 && !m.causal ? cssVar("--accent-soft") : panel); });
+  out += `<text x="${tx + 45}" y="${ty - 12}" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="${muted}">tokens (${toks.length})</text>`;
+  // embeddings
+  out += arrow(105, 150, 135);
+  out += box(140, 110, 130, 80, "embed", `${(m.V || 0).toLocaleString()} × ${D}` + (m.pos === "learned" ? ` + ${m.ctx} pos` : m.pos === "rope" ? " + RoPE" : ""));
+  out += arrow(275, 150, 305);
+  // encoder stack: draw up to 6 stacked blocks with a count label
+  const nShow = Math.min(6, L); const bx = 310, bw = 250;
+  for (let i = nShow - 1; i >= 0; i--) { out += `<rect x="${bx + i * 6}" y="${90 - i * 6}" width="${bw}" height="120" rx="10" fill="${panel}" stroke="${line}"/>`; }
+  out += `<text x="${bx + bw / 2}" y="112" text-anchor="middle" font-size="12" font-family="IBM Plex Sans, sans-serif" fill="${ink}">${L} × ${m.causal ? "decoder block (causal)" : "encoder block (bidirectional)"}</text>`;
+  out += `<rect x="${bx + 16}" y="122" width="${bw - 32}" height="34" rx="6" fill="${cssVar("--accent-soft") || "#1f3a33"}" stroke="${acc}"/><text x="${bx + bw / 2}" y="138" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="${ink}">attention: ${m.H || "?"} heads${m.KV ? `, ${m.KV} KV` : ""} · d_head ${m.H ? D / m.H : "?"}</text><text x="${bx + bw / 2}" y="151" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" fill="${muted}">${m.causal ? "each token sees only earlier tokens" : "every token attends to every token"}</text>`;
+  out += `<rect x="${bx + 16}" y="162" width="${bw - 32}" height="34" rx="6" fill="${panel}" stroke="${line}"/><text x="${bx + bw / 2}" y="178" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="${ink}">MLP ${D} → ${m.F || "?"} → ${D}${m.G ? " (SwiGLU)" : " (GELU)"}</text><text x="${bx + bw / 2}" y="191" text-anchor="middle" font-size="10" font-family="IBM Plex Mono, monospace" fill="${muted}">+ residual, + LayerNorm</text>`;
+  out += arrow(bx + bw + 5, 150, bx + bw + 35);
+  // pooling
+  const px = bx + bw + 40;
+  out += box(px, 110, 130, 80, "pool", m.pool);
+  out += arrow(px + 135, 150, px + 165);
+  out += box(px + 170, 110, 110, 80, "normalize", "‖v‖ = 1");
+  out += arrow(px + 285, 150, px + 315);
+  // vector
+  const vx = px + 320; const vn = 12;
+  for (let i = 0; i < vn; i++) { const v = Math.sin(i * 1.7 + words.length) * 0.5 + 0.5; out += `<rect x="${vx}" y="${60 + i * 15}" width="40" height="13" rx="3" fill="${acc}" opacity="${0.25 + 0.7 * v}"/>`; }
+  out += `<text x="${vx + 20}" y="${60 + vn * 15 + 14}" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="${muted}">d = ${m.dim}</text>`;
+  out += `<text x="${vx + 20}" y="48" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="${muted}">vector</text>`;
+  svg.innerHTML = out;
+  const pr = emParams(m);
+  $("emNote").textContent = pr ? `${m.name}: ${m.family}. ${m.L} layers × ${fmtN(pr.per_layer)} params (attention ${fmtN(pr.attn)}, MLP ${fmtN(pr.mlp)}) + embeddings ${fmtN(pr.embed)}${pr.pooler ? ` + pooler ${fmtN(pr.pooler)}` : ""} = ${fmtN(pr.total)} total. Context ${m.ctx.toLocaleString()} tokens, ${m.pool} pooling, ${m.dim}-d output. ${m.note}.` : `${m.name}: ${m.note}. Output ${m.dim} dims, context ${m.ctx.toLocaleString()} tokens.`;
+}
+function emTable() {
+  const rows = EM_PRESETS.map((m) => { const pr = emParams(m); return `<tr><td>${m.name}</td><td>${m.family}</td><td>${m.L ?? "?"}</td><td>${m.D ?? "?"}</td><td>${m.H ?? "?"}</td><td>${m.F ?? "?"}</td><td>${pr ? fmtN(pr.total) : "?"}</td><td>${m.ctx.toLocaleString()}</td><td>${m.pool}</td><td>${m.dim}</td></tr>`; });
+  $("emTable").innerHTML = "<tr><th>model</th><th>family</th><th>layers</th><th>d_model</th><th>heads</th><th>mlp</th><th>params</th><th>ctx</th><th>pooling</th><th>dim</th></tr>" + rows.join("");
+}
+(function emInit() {
+  const sel = $("emPreset"); if (!sel) return;
+  sel.innerHTML = EM_PRESETS.map((m) => `<option value="${m.id}">${m.name}</option>`).join("");
+  sel.value = "bge-b";
+  const cur = () => EM_PRESETS.find((m) => m.id === sel.value);
+  sel.onchange = () => emDraw(cur());
+  $("emText").addEventListener("input", () => emDraw(cur()));
+  $("emLoad").onclick = () => { const m = cur(); if (!m.L) return; arApply({ L: m.L, D: m.D, H: m.H, KV: m.KV || m.H, V: m.V, F: m.F, G: m.G, E: 1, K: 1, T: 1, ctx: m.ctx }); $("arNote").textContent += ` Loaded ${m.name}: an encoder, so ignore the KV-cache line (no autoregressive decoding) and add ${m.pos === "learned" ? fmtN(m.ctx * m.D) + " learned position embeddings" : "nothing for RoPE"}${m.pool === "cls" ? " and a " + fmtN(m.D * m.D) + " pooler" : ""}.`; document.querySelector("#s-arch .card").scrollIntoView({ behavior: "smooth", block: "start" }); };
+  emTable(); emDraw(cur());
 })();
 
 // ---------------------------------------------------------------- control surface (Cortex embeds this page and its agent tools drive it)

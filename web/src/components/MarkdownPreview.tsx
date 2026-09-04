@@ -15,6 +15,13 @@ interface Props {
 /** Intercepts clicks on cortex:// links anywhere inside rendered markdown. */
 export function handleCortexClick(e: MouseEvent<HTMLElement>): boolean {
   const target = e.target as HTMLElement | null;
+  const runBtn = target?.closest?.("button.run-code");
+  if (runBtn) {
+    e.preventDefault();
+    const code = runBtn.closest(".codeblock")?.querySelector("pre code")?.textContent ?? "";
+    window.dispatchEvent(new CustomEvent("cortex:run-code", { detail: { code } }));
+    return true;
+  }
   const a = target?.closest?.("a");
   if (!a) return false;
   const href = a.getAttribute("data-cortex") || a.getAttribute("href") || "";

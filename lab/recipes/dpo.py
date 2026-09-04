@@ -55,6 +55,9 @@ def build_parser():
     p.add_argument("--lora-r", type=int, default=16)
     p.add_argument("--lora-alpha", type=int, default=32)
     p.add_argument("--target-modules", default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj")
+    p.add_argument("--log-rollouts-every", type=int, default=10,
+                   help="every N steps (smoke) / N trainer logs (real) print ROLLOUT lines for a few pairs (0 disables)")
+    p.add_argument("--log-rollouts-n", type=int, default=3, help="pairs per ROLLOUT batch")
     return p
 
 
@@ -134,6 +137,13 @@ def smoke(args):
         C.metric(step, loss=loss.item(), lr=lr, reward_chosen=rew[c_idx].mean(), reward_rejected=rew[r_idx].mean(),
                  reward_margin=margin.mean(), reward_accuracy=(margin > 0).float().mean(), logps_chosen=logp[c_idx].mean(),
                  logps_rejected=logp[r_idx].mean())
+        if args.log_rollouts_every and (step % args.log_rollouts_every == 0 or step == args.steps - 1):
+            for j in range(min(args.log_rollouts_n, n)):
+                prompt, chosen, rejected = pairs[j]
+                C.rollout(step=step, idx=j, prompt=C.clip_text(prompt, 300), chosen=C.clip_text(chosen, 600),
+                          rejected=C.clip_text(rejected, 600), chosen_logp=logp[c_idx][j].item(), rejected_logp=logp[r_idx][j].item(),
+                          ref_chosen_logp=ref_logp[c_idx][j].item(), ref_rejected_logp=ref_logp[r_idx][j].item(),
+                          chosen_reward=rew[c_idx][j].item(), rejected_reward=rew[r_idx][j].item(), margin=margin[j].item())
     path = C.save_checkpoint(os.path.join(args.out, "ckpt.pt"), policy, tok, args.steps)
     C.status("done", f"saved {path}")
     C.result(final_loss=loss.item(), reward_margin=margin.mean(), reward_accuracy=(margin > 0).float().mean(),
@@ -141,6 +151,54 @@ def smoke(args):
 
 
 # --------------------------------------------------------------------------- real: TRL DPOTrainer
+
+
+def hf_response_logp(model, tokenizer, prompt, response, device):
+    """Sum of log p(response tokens | prompt) for a string pair or a conversational one.
+
+    Conversational rows (lists of {role, content}): when the dataset has no prompt column the
+    response list carries the whole conversation and its last message is the response.
+    Returns (logp, prompt_text, response_text)."""
+    if isinstance(response, list):
+        msgs = prompt if isinstance(prompt, list) else ([{"role": "user", "content": prompt}] if prompt else response[:-1])
+        resp = response if (prompt or len(response) == 1) else response[-1:]
+        p_text = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        full = tokenizer.apply_chat_template(msgs + resp, tokenize=False)
+        r_text = resp[-1]["content"]
+    else:
+        p_text, full, r_text = (prompt or ""), (prompt or "") + response, response
+    p_ids = tokenizer(p_text, add_special_tokens=False)["input_ids"] if p_text else []
+    ids = tokenizer(full, add_special_tokens=False)["input_ids"]
+    x = torch.tensor([ids], device=device)
+    with torch.no_grad():
+        logits = model(x).logits[0, :-1].float()
+    lp = F.log_softmax(logits, -1).gather(-1, x[0, 1:, None])[:, 0]
+    return lp[max(0, len(p_ids) - 1):].sum().item(), p_text, r_text
+
+
+def log_pairs_hf(model, tokenizer, rows, beta, step):
+    """ROLLOUT lines for a few pairs: policy vs adapter-disabled reference log-probs and the implicit margin."""
+    device = next(model.parameters()).device
+    was_training = model.training
+    model.eval()
+    for j, row in enumerate(rows):
+        vals = {}
+        for tag in ("chosen", "rejected"):
+            lp, p_text, r_text = hf_response_logp(model, tokenizer, row.get("prompt"), row[tag], device)
+            if hasattr(model, "disable_adapter"):
+                with model.disable_adapter():
+                    ref_lp, _, _ = hf_response_logp(model, tokenizer, row.get("prompt"), row[tag], device)
+            else:
+                ref_lp = lp
+            vals[tag] = (lp, ref_lp, p_text, r_text)
+        rc = beta * (vals["chosen"][0] - vals["chosen"][1])
+        rr = beta * (vals["rejected"][0] - vals["rejected"][1])
+        C.rollout(step=step, idx=j, prompt=C.clip_text(vals["chosen"][2], 300), chosen=C.clip_text(vals["chosen"][3], 600),
+                  rejected=C.clip_text(vals["rejected"][3], 600), chosen_logp=vals["chosen"][0], rejected_logp=vals["rejected"][0],
+                  ref_chosen_logp=vals["chosen"][1], ref_rejected_logp=vals["rejected"][1], chosen_reward=rc, rejected_reward=rr,
+                  margin=rc - rr)
+    if was_training:
+        model.train()
 
 
 def real(args):
@@ -179,9 +237,27 @@ def real(args):
                   beta=args.beta, loss_type=args.loss_type, max_length=args.max_len)
     if "max_prompt_length" in sig:
         cfg_kw["max_prompt_length"] = args.max_prompt_len
+    class RolloutCallback(transformers.TrainerCallback):
+        """Every --log-rollouts-every trainer logs, score --log-rollouts-n training pairs and print ROLLOUT lines."""
+
+        def __init__(self):
+            self.n, self.warned = 0, False
+
+        def on_log(self, a, state, control, **kw):
+            self.n += 1
+            m = kw.get("model")
+            if not args.log_rollouts_every or self.n % args.log_rollouts_every or m is None:
+                return
+            try:
+                log_pairs_hf(m, tokenizer, rows[: args.log_rollouts_n], args.beta, state.global_step)
+            except Exception as e:  # never let display code stop training
+                if not self.warned:
+                    C.log(f"[rollout] skipped: {type(e).__name__}: {e}")
+                    self.warned = True
+
     tr_sig = inspect.signature(trl.DPOTrainer.__init__).parameters
     tr_kw = dict(model=model, ref_model=None, args=trl.DPOConfig(**cfg_kw), train_dataset=train_ds, peft_config=peft_config,
-                 callbacks=[C.make_metric_callback()])
+                 callbacks=[C.make_metric_callback(), RolloutCallback()])
     tr_kw["processing_class" if "processing_class" in tr_sig else "tokenizer"] = tokenizer
     trainer = trl.DPOTrainer(**tr_kw)
     out = trainer.train()

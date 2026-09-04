@@ -24,6 +24,14 @@ function sanitizeHtml(raw: string): string {
     return closing ? `</${t}>` : `<${t}${open}>`;
   });
 }
+const defaultFence = md.renderer.rules.fence!;
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const html = defaultFence(tokens, idx, options, env, self);
+  const lang = (tokens[idx].info || "").trim().split(/\s+/)[0].toLowerCase();
+  if (lang !== "python" && lang !== "py") return html;
+  // The app turns this into a real run (lab/recipes protocol: METRIC lines become charts).
+  return `<div class="codeblock" data-lang="python"><div class="codebar"><span>python</span><button type="button" class="run-code" title="Run this snippet on your GPU (or locally) and watch the output in the Lab">Run on GPU</button></div>${html}</div>`;
+};
 md.renderer.rules.html_block = (tokens, idx) => sanitizeHtml(tokens[idx].content);
 md.renderer.rules.html_inline = (tokens, idx) => sanitizeHtml(tokens[idx].content);
 

@@ -157,6 +157,8 @@ def build_parser():
     p.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
     p.add_argument("--lora-r", type=int, default=16)
     p.add_argument("--max-prompt-len", type=int, default=256)
+    p.add_argument("--log-rollouts-every", type=int, default=5,
+                   help="every N steps print one ROLLOUT line per sample of the first group (0 disables)")
     return p
 
 
@@ -234,6 +236,14 @@ def greedy_eval(policy, tok, tasks, max_new, device):
     return total / n, {k: v / n for k, v in parts_sum.items()}
 
 
+def log_group(step, task, prompt, texts, rewards, adv, parts, kl_seq, G):
+    """One ROLLOUT line per sample of the first group of this step (rows 0..G-1 all share `task`)."""
+    for i in range(G):
+        C.rollout(step=step, group=0, idx=i, prompt=C.clip_text(prompt, 300), completion=C.clip_text(texts[i], 600),
+                  reward=float(rewards[i]), advantage=float(adv[i]), parse=parts[i]["parse"], tool=parts[i]["tool"],
+                  answer=parts[i]["answer"], kl=float(kl_seq[i]), expected=task.demo)
+
+
 def smoke(args):
     device = C.pick_device(args.device)
     tasks = make_tasks(args.n_tasks, args.seed)
@@ -285,6 +295,9 @@ def smoke(args):
         with torch.no_grad():
             clip_frac = (((ratio - 1).abs() > args.eps_clip).float() * m).sum() / m.sum()
             kl_mean = (kl * m).sum() / m.sum()
+            kl_seq = (kl * m).sum(1) / m.sum(1).clamp(min=1)
+        if args.log_rollouts_every and (step % args.log_rollouts_every == 0 or step == 1):
+            log_group(step, batch[0], f"q: {batch[0].question}\n", texts, rewards, adv, parts, kl_seq, args.group)
         reward_trace.append(rewards.mean().item())
         fields = dict(loss=loss.item(), reward_mean=rewards.mean(), reward_std=rewards.std(), kl=kl_mean, clip_frac=clip_frac,
                       completion_len=m.sum(1).mean(), zero_var_groups=(r.std(1) < 1e-6).float().mean(),
@@ -319,11 +332,29 @@ def real(args):
              "tool": t.tool, "args_json": json.dumps(t.args), "answer": t.answer} for t in tasks]
     ds = datasets.Dataset.from_list(rows)
 
-    def tool_reward(completions, tool, args_json, answer, **kw):
-        out = []
+    calls = {"n": 0}
+
+    def tool_reward(completions, tool, args_json, answer, prompts=None, **kw):
+        out, parts_all, texts = [], [], []
         for c, tl, aj, an in zip(completions, tool, args_json, answer):
             text = c[-1]["content"] if isinstance(c, list) else c
-            out.append(score(text, Task("", tl, json.loads(aj), an))[0])
+            r, parts = score(text, Task("", tl, json.loads(aj), an))
+            out.append(r)
+            parts_all.append(parts)
+            texts.append(text)
+        # ROLLOUT lines: TRL calls the reward once per generation step (completions for one prompt are
+        # contiguous), so the first `group` rows are the first group; the advantage below is the group
+        # normalization GRPO applies (before any scale_rewards option), computed here for display.
+        calls["n"] += 1
+        if args.log_rollouts_every and calls["n"] % args.log_rollouts_every == 0:
+            G = min(args.group, len(out))
+            grp = torch.tensor(out[:G])
+            adv = (grp - grp.mean()) / (grp.std() + 1e-4) if G > 1 else grp * 0
+            for i in range(G):
+                pr = prompts[i] if prompts else ""
+                q = pr[-1]["content"] if isinstance(pr, list) and pr else pr
+                C.rollout(step=calls["n"], group=0, idx=i, prompt=C.clip_text(q, 300), completion=C.clip_text(texts[i], 600),
+                          reward=out[i], advantage=float(adv[i]), **parts_all[i])
         return out
 
     sig = inspect.signature(trl.GRPOConfig.__init__).parameters

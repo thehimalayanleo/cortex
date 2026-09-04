@@ -59,6 +59,9 @@ h2{font:700 30px/1.15 var(--display);letter-spacing:-.02em;margin:6px 0 10px;tex
 canvas.chart{width:100%;height:190px;display:block;background:var(--panel-2);border-radius:10px}
 canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);border-radius:10px}
 .moe-usage{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin:8px 0;font:11.5px var(--mono);color:var(--muted)}.moe-usage .bars{display:flex;gap:4px;height:22px}.moe-usage .bars span{flex:1;background:var(--panel-2);border-radius:4px;position:relative;overflow:hidden}.moe-usage .bars span i{position:absolute;left:0;bottom:0;width:100%;background:var(--accent);opacity:.85}.moe-usage .bars span b{position:absolute;left:0;right:0;top:3px;text-align:center;font:10px var(--mono);color:var(--ink);font-weight:500}
+.card.start{margin:12px 0 18px;border-color:var(--accent)}.card.start ol{margin:6px 0 0 18px;padding:0}.card.start li{margin:6px 0;max-width:80ch}
+.tbl{width:100%;border-collapse:collapse;font:12.5px var(--mono);margin:8px 0}.tbl td,.tbl th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right}.tbl td:first-child,.tbl th:first-child{text-align:left;color:var(--muted)}.tbl tr.total td{color:var(--ink);font-weight:600}
+.controls input[type=number],.controls input[type=text]{font:inherit;color:inherit;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
 .paint-row{display:flex;gap:14px;margin:6px 0 10px}.paint-cell{display:flex;flex-direction:column;align-items:center;gap:4px;font:11px var(--mono);color:var(--faint)}.paint-cell canvas{border:1px solid var(--line);border-radius:6px;image-rendering:pixelated;background:#fff}
 .paint-group{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}.paint-group .c{display:flex;flex-direction:column;align-items:center;font:10.5px var(--mono);color:var(--muted)}.paint-group canvas{width:56px;height:56px;border:1px solid var(--line);border-radius:4px;image-rendering:pixelated;background:#fff}.paint-group .c.best canvas{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 .sample{font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;background:var(--panel-2);border-radius:10px;padding:10px 12px;min-height:64px;color:var(--ink)}
@@ -100,6 +103,7 @@ canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);bord
     <a class="st" href="#paint" data-st="paint"><b>7 · Paint</b>RL with a rendered reward</a>
     <a class="st" href="#speculative" data-st="speculative"><b>8 · Speculative</b>Draft, then verify in one pass</a>
     <a class="st" href="#moe" data-st="moe"><b>9 · MoE</b>Route tokens to experts</a>
+    <a class="st" href="#arch" data-st="arch"><b>10 · Architecture</b>Count, size, and poke the model</a>
     <div class="foot">
       <div>backend <b id="backend">…</b></div>
       <div>params per toy model <b id="nparams">…</b></div>
@@ -111,8 +115,17 @@ canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);bord
     <!-- ================================================================ OVERVIEW -->
     <section class="station on" id="s-overview">
       <div class="eyebrow">Map</div>
-      <h2>Six stages, one tiny transformer, trained in front of you</h2>
+      <h2>Ten stations, one tiny transformer, trained in front of you</h2>
       <p class="lede">Every station below trains a real model with real gradients on your GPU, small enough to converge in under a minute. Beside each toy is the matching call in Marin, Stanford's open pipeline (JAX and Levanter). The toy uses characters instead of a 128k-token BPE vocabulary and two layers of width 48 instead of 32 layers of width 4096; the loss functions, the schedules, and the failure modes are the same.</p>
+      <div class="card start">
+        <h3>Start here (20 minutes)</h3>
+        <ol>
+          <li><b>Press Train at station 2.</b> Watch one number: the loss. It starts at ln(vocab), which is guessing, and falls. When the sample stops being gibberish, the model has learned something. Everything else in this lab is a variation on that loop.</li>
+          <li><b>Read Lab 02 in Cortex</b> (Chapters tab). It explains the number you just watched, with the math, and ends with a self-test.</li>
+          <li><b>Ask the chat</b> "quiz me on chapter 2". Pass, and it moves your card in My plan. Then take the stations in order; each one changes exactly one thing about the loop (the data mix, the loss, the objective, the architecture).</li>
+        </ol>
+        <p class="note">Every button here is also an agent tool. "Train the paint station for 100 steps and tell me the blank rate" works in the chat and in a WebMCP browser. The GPU runs tab does the same on your real GPU with readable scripts you can edit and rerun.</p>
+      </div>
       <div class="flow">
         <a href="#data"><b>Data</b><small>text → token ids → fixed windows, packed into batches</small></a>
         <a href="#pretrain"><b>Pretrain</b><small>decoder, causal attention, next-token cross-entropy</small></a>
@@ -123,6 +136,7 @@ canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);bord
         <a href="#paint"><b>Paint with code</b><small>a policy writes drawing programs; render, score against a reference, GRPO update</small></a>
         <a href="#speculative"><b>Speculative decoding</b><small>a cheap draft proposes k tokens, the model verifies them in one forward pass, exact same distribution</small></a>
         <a href="#moe"><b>Mixture of experts</b><small>a router sends each token to one of four MLPs; watch experts specialise by domain and the balance loss fight collapse</small></a>
+        <a href="#arch"><b>Architecture</b><small>a calculator for parameters, FLOPs and KV bytes from a config, and a probe that shows the trained model's weights, attention and per-layer predictions</small></a>
       </div>
       <div class="grid">
         <div class="card">
@@ -474,6 +488,54 @@ tinystories_tokenized = tokenized(
         </div>
       </div>
     </section>
+
+    <!-- ================================================================ 10 ARCHITECTURE -->
+    <section class="station" id="s-arch">
+      <div class="eyebrow">Station 10</div>
+      <h2>Architecture: count it, size it, poke it</h2>
+      <p class="lede">Two tools. Left: a calculator that turns a config (layers, width, heads, KV heads, vocab, MLP width, experts) into parameters per component, FLOPs per token and KV-cache bytes per token, so you can check a model card by hand. Right: a probe into the model you trained at station 2: type a string and see which character each layer already predicts (a logit lens), the attention pattern of any head, and the weight matrices themselves.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Calculator</h3>
+          <div class="controls">
+            <label>preset <select id="arCfg"><option value="lab">this lab's model</option><option value="gpt2">GPT-2 small</option><option value="llama8b" selected>Llama-3 8B</option><option value="qwen05">Qwen2.5-0.5B</option><option value="mixtral">Mixtral 8x7B (MoE)</option><option value="custom">custom</option></select></label>
+          </div>
+          <div class="controls">
+            <label>layers <input id="arL" type="number" value="32" min="1" style="width:60px"></label>
+            <label>d_model <input id="arD" type="number" value="4096" min="8" style="width:70px"></label>
+            <label>heads <input id="arH" type="number" value="32" min="1" style="width:56px"></label>
+            <label>kv heads <input id="arKV" type="number" value="8" min="1" style="width:56px"></label>
+            <label>vocab <input id="arV" type="number" value="128256" min="2" style="width:80px"></label>
+            <label>mlp <input id="arF" type="number" value="14336" min="8" style="width:70px"></label>
+            <label>gated <select id="arG"><option value="1" selected>SwiGLU (3 mats)</option><option value="0">plain (2 mats)</option></select></label>
+            <label>experts <input id="arE" type="number" value="1" min="1" style="width:50px"></label>
+            <label>active <input id="arK" type="number" value="1" min="1" style="width:50px"></label>
+            <label>tied head <select id="arT"><option value="0" selected>no</option><option value="1">yes</option></select></label>
+            <label>ctx <input id="arCtx" type="number" value="8192" min="1" style="width:70px"></label>
+            <label>kv dtype <select id="arB"><option value="2" selected>bf16</option><option value="1">fp8/int8</option></select></label>
+          </div>
+          <table class="tbl" id="arTable"></table>
+          <p class="note" id="arNote"></p>
+        </div>
+        <div class="card">
+          <h3>Probe the trained model</h3>
+          <div class="controls">
+            <label>text <input id="arText" type="text" value="the little fox found a red ball" style="width:260px"></label>
+            <label>layer <select id="arLayer"><option value="0">after layer 1</option><option value="1" selected>after layer 2 (final)</option></select></label>
+            <label>head <select id="arHead"><option value="0" selected>0</option><option value="1">1</option><option value="2">2</option></select></label>
+            <button type="button" class="primary" id="arProbe">Probe</button>
+          </div>
+          <div class="sample" id="arLens">(pretrain first, then probe: each column is a position; rows show the top prediction after each layer)</div>
+          <div class="paint-row">
+            <div class="paint-cell"><canvas id="arAttn" width="192" height="192"></canvas><small>attention, chosen layer and head</small></div>
+            <div class="paint-cell"><canvas id="arW" width="192" height="192"></canvas><small id="arWLabel">W_Q of that head (rows d_model, cols head_dim)</small></div>
+            <div class="paint-cell"><canvas id="arNorm" width="192" height="192"></canvas><small>residual norm per position, per layer</small></div>
+          </div>
+          <p class="note">The logit lens applies the final LayerNorm and the tied unembedding to the residual stream after each layer. Early layers guess frequent characters; the last layer's guess is the model's actual output. Lab 11 has the shapes; recipes/inspect_model.py does the same for a real Hugging Face model on the 5090.</p>
+        </div>
+      </div>
+    </section>
+
 
 
   </main>
@@ -869,7 +931,7 @@ $("kmStep").onclick = kmStep; $("kmReset").onclick = kmInit; $("kmK").onchange =
 $("kmRun").onclick = () => { if (!km) kmInit(); if (!km) return; let guard = 0; const loop = () => { const moved = kmStep(); if (moved > 0 && guard++ < 30) setTimeout(loop, 220); }; loop(); };
 
 // ---------------------------------------------------------------- navigation + boot
-function show(id) { document.querySelectorAll(".station").forEach((s) => s.classList.toggle("on", s.id === "s-" + id)); document.querySelectorAll(".nav a.st").forEach((a) => a.classList.toggle("on", a.dataset.st === id)); if (id === "cluster") kmDraw(); if (id === "encoder") drawScatter(); if (id === "pretrain") drawAttn(); if (id === "paint" && !paintLogits) paintInit(); if (id === "moe" && !MOE && P) moeInit(); }
+function show(id) { document.querySelectorAll(".station").forEach((s) => s.classList.toggle("on", s.id === "s-" + id)); document.querySelectorAll(".nav a.st").forEach((a) => a.classList.toggle("on", a.dataset.st === id)); if (id === "cluster") kmDraw(); if (id === "encoder") drawScatter(); if (id === "pretrain") drawAttn(); if (id === "paint" && !paintLogits) paintInit(); if (id === "moe" && !MOE && P) moeInit(); if (id === "arch") { arCalc(); if (P) arProbe(); } }
 
 
 // ---------------------------------------------------------------- station 7: paint with code (GRPO with a rendered reward)
@@ -1044,8 +1106,72 @@ function moeStepOnce() {
 $("moeRun").onclick = () => { if (!MOE) moeInit(); if (moeStop) moeStop(); moeStop = runner(Number($("moeSteps").value), () => moeStepOnce()); };
 $("moeReset").onclick = moeInit; $("moeE").onchange = moeInit;
 
+
+// ---------------------------------------------------------------- station 10: architecture calculator + model probe
+const AR_PRESETS = {
+  lab: { L: 2, D: 48, H: 3, KV: 3, V: 0, F: 192, G: 0, E: 1, K: 1, T: 1, ctx: 64 },
+  gpt2: { L: 12, D: 768, H: 12, KV: 12, V: 50257, F: 3072, G: 0, E: 1, K: 1, T: 1, ctx: 1024 },
+  llama8b: { L: 32, D: 4096, H: 32, KV: 8, V: 128256, F: 14336, G: 1, E: 1, K: 1, T: 0, ctx: 8192 },
+  qwen05: { L: 24, D: 896, H: 14, KV: 2, V: 151936, F: 4864, G: 1, E: 1, K: 1, T: 1, ctx: 32768 },
+  mixtral: { L: 32, D: 4096, H: 32, KV: 8, V: 32000, F: 14336, G: 1, E: 8, K: 2, T: 0, ctx: 32768 },
+};
+const fmtN = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + " B" : n >= 1e6 ? (n / 1e6).toFixed(2) + " M" : n >= 1e3 ? (n / 1e3).toFixed(1) + " k" : String(n);
+function arRead() { const g = (id) => Number($(id).value); return { L: g("arL"), D: g("arD"), H: g("arH"), KV: g("arKV"), V: g("arV") || V, F: g("arF"), G: Number($("arG").value), E: g("arE"), K: g("arK"), T: Number($("arT").value), ctx: g("arCtx"), B: Number($("arB").value) }; }
+function arApply(p) { $("arL").value = p.L; $("arD").value = p.D; $("arH").value = p.H; $("arKV").value = p.KV; $("arV").value = p.V || V; $("arF").value = p.F; $("arG").value = p.G; $("arE").value = p.E; $("arK").value = p.K; $("arT").value = p.T; $("arCtx").value = p.ctx; arCalc(); }
+function arCalc() {
+  const c = arRead(); const hd = c.D / c.H;
+  const attn = c.D * (c.H * hd) + 2 * c.D * (c.KV * hd) + (c.H * hd) * c.D;      // Wq, Wk, Wv (GQA), Wo
+  const mlpOne = (c.G ? 3 : 2) * c.D * c.F;                                       // gate/up/down or up/down
+  const mlpTotal = mlpOne * c.E, mlpActive = mlpOne * c.K, router = c.E > 1 ? c.D * c.E : 0;
+  const norms = 2 * c.D, embed = c.V * c.D, head = c.T ? 0 : c.V * c.D;
+  const perLayerTotal = attn + mlpTotal + router + norms, perLayerActive = attn + mlpActive + router + norms;
+  const total = c.L * perLayerTotal + embed + head + c.D, active = c.L * perLayerActive + embed + head + c.D;
+  const nonEmbActive = active - embed - head;
+  const flopsTok = 2 * nonEmbActive + 2 * c.V * c.D + 4 * c.L * c.D * c.ctx;          // matmuls + head + attention scores/values at full ctx
+  const kvTok = c.L * 2 * c.KV * hd * c.B;                                            // bytes per token
+  const rows = [["token embedding", embed, embed], ["attention (per layer)", attn, attn], ["MLP (per layer" + (c.E > 1 ? `, ${c.E} experts)` : ")"), mlpTotal, mlpActive], ["router (per layer)", router, router], ["norms (per layer)", norms, norms], ["all " + c.L + " layers", c.L * perLayerTotal, c.L * perLayerActive], ["unembedding" + (c.T ? " (tied)" : ""), head, head]];
+  $("arTable").innerHTML = "<tr><th>component</th><th>total params</th><th>active params</th></tr>" + rows.map(([n, t, a]) => `<tr><td>${n}</td><td>${fmtN(t)}</td><td>${fmtN(a)}</td></tr>`).join("") + `<tr class="total"><td>model</td><td>${fmtN(total)}</td><td>${fmtN(active)}</td></tr>`;
+  $("arNote").textContent = `head_dim ${hd}; FLOPs per token at ctx ${c.ctx}: about ${fmtN(flopsTok)} (2·params for matmuls + 4·L·d·ctx for attention); KV cache ${kvTok.toLocaleString()} bytes per token = ${(kvTok * c.ctx / 2 ** 30).toFixed(2)} GiB for a full ${c.ctx}-token context; weights in bf16: ${(total * 2 / 2 ** 30).toFixed(2)} GiB.`;
+}
+$("arCfg").onchange = () => { const k = $("arCfg").value; if (AR_PRESETS[k]) arApply(AR_PRESETS[k]); };
+["arL", "arD", "arH", "arKV", "arV", "arF", "arG", "arE", "arK", "arT", "arCtx", "arB"].forEach((id) => $(id).addEventListener("input", () => { $("arCfg").value = "custom"; arCalc(); }));
+function arProbe() {
+  if (!P) { $("arLens").textContent = "pretrain first (station 2), then probe"; return; }
+  const text = $("arText").value.slice(0, MAXCTX) || "the"; const ids = enc(text); const Tn = ids.length; const layer = Number($("arLayer").value), head = Number($("arHead").value);
+  const out = tf.tidy(() => {
+    const x = tf.tensor2d([ids], [1, Tn], "int32");
+    // re-run the forward pass by hand so we can read the residual after each layer
+    let h = tf.gather(P.tok, x).add(P.pos.slice([0, 0], [Tn, D])); const mask = tf.linalg.bandPart(tf.ones([Tn, Tn]), -1, 0);
+    const lens = [], norms = [], attns = [];
+    for (let li = 0; li < LAYERS; li++) {
+      const Lr = P.layers[li]; const n1 = layerNorm(h, Lr.ln1G, Lr.ln1B);
+      const split = (w) => lin(n1, w).reshape([1, Tn, H, DH]).transpose([0, 2, 1, 3]);
+      const q = split(Lr.wq), k = split(Lr.wk), v = split(Lr.wv);
+      let sc = q.matMul(k, false, true).div(Math.sqrt(DH)); sc = sc.add(mask.sub(1).mul(1e9)); const a = tf.softmax(sc, -1);
+      attns.push(a.slice([0, head, 0, 0], [1, 1, Tn, Tn]).reshape([Tn, Tn]).arraySync());
+      const o = a.matMul(v).transpose([0, 2, 1, 3]).reshape([Tn, D]).matMul(Lr.wo).reshape([1, Tn, D]); h = h.add(o);
+      const n2 = layerNorm(h, Lr.ln2G, Lr.ln2B); const pre = lin(n2, Lr.w1).add(Lr.b1); const act = tf.gelu ? tf.gelu(pre) : pre.mul(0.5).mul(tf.tanh(pre.mul(0.7978845608)).add(1)); h = h.add(lin(act, Lr.w2).add(Lr.b2));
+      norms.push(h.reshape([Tn, D]).norm(2, 1).arraySync());
+      const logits = layerNorm(h, P.lnfG, P.lnfB).reshape([Tn, D]).matMul(P.tok, false, true); lens.push(logits.argMax(-1).arraySync());
+    }
+    const w = P.layers[layer].wq.slice([0, head * DH], [D, DH]).arraySync();
+    return { lens, norms, attns, w };
+  });
+  const chars = ids.map((i) => CHARS[i] === " " ? "␣" : CHARS[i]);
+  let txt = "input   " + chars.join(" ") + "\n";
+  out.lens.forEach((row, li) => { txt += `layer ${li + 1} ` + row.map((i) => CHARS[i] === " " ? "␣" : CHARS[i] === "\n" ? "↵" : CHARS[i]).join(" ") + "\n"; });
+  txt += "\n(each column: the character that layer would predict comes NEXT after that position)";
+  $("arLens").textContent = txt;
+  heat($("arAttn"), Float32Array.from(out.attns[layer].flat()), Tn);
+  const wf = Float32Array.from(out.w.flat()); const mx = Math.max(...Array.from(wf).map(Math.abs)) || 1; heatRect($("arW"), wf.map((v) => 0.5 + v / (2 * mx)), D, DH);
+  const nm = Float32Array.from(out.norms.flat()); const nmax = Math.max(...Array.from(nm)) || 1; heatRect($("arNorm"), nm.map((v) => v / nmax), LAYERS, Tn);
+  $("arWLabel").textContent = `W_Q, layer ${layer + 1}, head ${head} (${D} × ${DH}; mid-grey is zero)`;
+}
+function heatRect(canvas, m, rows, cols) { const g = canvas.getContext("2d"); const w = canvas.width, h = canvas.height; const img = g.createImageData(w, h); const acc = cssVar("--accent") || "#4db39d"; const [ar, ag, ab] = [parseInt(acc.slice(1, 3), 16), parseInt(acc.slice(3, 5), 16), parseInt(acc.slice(5, 7), 16)]; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const v = Math.max(0, Math.min(1, m[Math.floor(y * rows / h) * cols + Math.floor(x * cols / w)] || 0)); const o = (y * w + x) * 4; img.data[o] = Math.round(20 + v * (ar - 20)); img.data[o + 1] = Math.round(24 + v * (ag - 24)); img.data[o + 2] = Math.round(22 + v * (ab - 22)); img.data[o + 3] = 255; } g.putImageData(img, 0, 0); }
+$("arProbe").onclick = arProbe;
+
 // ---------------------------------------------------------------- control surface (Cortex embeds this page and its agent tools drive it)
-const STATION_RUN = { pretrain: "ptRun", midtrain: "mtRun", sft: "sftRun", dpo: "dpoRun", encoder: "encMlm", contrastive: "encCon", cluster: "kmRun", paint: "paintRun", speculative: "spRun", moe: "moeRun" };
+const STATION_RUN = { pretrain: "ptRun", midtrain: "mtRun", sft: "sftRun", dpo: "dpoRun", encoder: "encMlm", contrastive: "encCon", cluster: "kmRun", paint: "paintRun", speculative: "spRun", moe: "moeRun", arch: "arProbe" };
 const STATION_STEPS = { pretrain: "ptSteps", midtrain: "mtSteps", sft: "sftSteps", dpo: "dpoSteps", encoder: "encSteps", contrastive: "encSteps", paint: "paintSteps", speculative: "spSteps", moe: "moeSteps" };
 function labStatus() {
   const txt = (id) => { const el = document.getElementById(id); return el ? el.textContent : null; };
@@ -1058,6 +1184,7 @@ function labStatus() {
     encoder: { purity: txt("encPurity"), nn: txt("encNN") },
     cluster: { inertia: txt("kmInertia"), purity: txt("kmPurity") },
     speculative: { passes: spStats.passes, tokens: spStats.tokens, accept_rate: spStats.proposed ? spStats.accepted / spStats.proposed : null, tokens_per_pass: spStats.passes ? spStats.tokens / spStats.passes : null, text: txt("spText") },
+    arch: { lens: txt("arLens"), calculator: txt("arNote") },
     moe: { step: moeN, loss: moeHist.l.at(-1) ?? null, balance_loss: moeHist.b.at(-1) ?? null, max_expert_share: txt("moeMax") },
     paint: { step: paintN, reward_mean: paintHist.at(-1) ?? null, best: paintBestR > 0 ? paintBestR : null, blank_rate: txt("paintBlank"), kl: txt("paintKL"), best_program: paintBestProg },
     errors: window.__labErrors,
@@ -1071,7 +1198,7 @@ function labRun(station, steps) {
     if (stepsEl.tagName === "SELECT" && ![...stepsEl.options].some((o) => o.value === String(steps))) { const o = document.createElement("option"); o.value = o.textContent = String(steps); stepsEl.appendChild(o); }
     stepsEl.value = String(steps);
   }
-  const target = { pretrain: "pretrain", midtrain: "midtrain", sft: "posttrain", dpo: "posttrain", encoder: "encoder", contrastive: "encoder", cluster: "cluster", paint: "paint", speculative: "speculative", moe: "moe" }[station];
+  const target = { pretrain: "pretrain", midtrain: "midtrain", sft: "posttrain", dpo: "posttrain", encoder: "encoder", contrastive: "encoder", cluster: "cluster", paint: "paint", speculative: "speculative", moe: "moe", arch: "arch" }[station];
   if (location.hash.slice(1) !== target) { location.hash = target; }
   if (station === "dpo") document.querySelector('[data-pt="dpo"]')?.click();
   if (station === "sft") document.querySelector('[data-pt="sft"]')?.click();
@@ -1080,7 +1207,7 @@ function labRun(station, steps) {
 }
 window.addEventListener("message", (e) => {
   const m = e.data || {};
-  if (m.type === "lab:run") e.source?.postMessage({ type: "lab:ack", id: m.id, ...labRun(m.station, m.steps) }, "*");
+  if (m.type === "lab:run") { if (m.station === "arch" && m.text) { const el = document.getElementById("arText"); if (el) el.value = String(m.text).slice(0, 64); } e.source?.postMessage({ type: "lab:ack", id: m.id, ...labRun(m.station, m.steps) }, "*"); }
   if (m.type === "lab:status") e.source?.postMessage({ type: "lab:status", id: m.id, status: labStatus() }, "*");
   if (m.type === "lab:show") { location.hash = m.station; e.source?.postMessage({ type: "lab:ack", id: m.id, ok: true }, "*"); }
 });

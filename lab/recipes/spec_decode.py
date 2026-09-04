@@ -59,6 +59,7 @@ def build_parser():
     p.add_argument("--target", default="Qwen/Qwen2.5-1.5B-Instruct")
     p.add_argument("--draft", default="Qwen/Qwen2.5-0.5B-Instruct")
     p.add_argument("--prompts-jsonl", default=None, help='real: rows of {"prompt": ...}')
+    p.add_argument("--log-passes", type=int, default=6, help="print a ROLLOUT line for the first N verify passes (0 disables)")
     return p
 
 
@@ -69,7 +70,7 @@ def spec_step(next_logits_target, next_logits_draft, prefix: torch.Tensor, k: in
     """One verify pass, vectorized over B rows that share a prefix length.
 
     next_logits_*(ids) -> logits (B, L, V) for the whole sequence. Returns
-    (new_tokens list-of-lists, n_accepted (B,)). Each row yields n_accepted + 1 tokens.
+    (new_tokens list-of-lists, n_accepted (B,), drafts (B, k)). Each row yields n_accepted + 1 tokens.
     """
     B, S = prefix.shape
     x = prefix
@@ -97,18 +98,23 @@ def spec_step(next_logits_target, next_logits_draft, prefix: torch.Tensor, k: in
         else:
             extra = torch.multinomial(p[b, k], 1, generator=gen)
         out.append(drafts[b, :n].tolist() + [int(extra)])
-    return out, n_acc
+    return out, n_acc, drafts
 
 
-def speculative_generate(next_target, next_draft, prompt: list[int], k: int, T: float, max_new: int, eos_id, gen, seq_len=None):
-    """Sequential loop for one prompt. Returns (tokens, stats)."""
+def speculative_generate(next_target, next_draft, prompt: list[int], k: int, T: float, max_new: int, eos_id, gen, seq_len=None,
+                         on_pass=None):
+    """Sequential loop for one prompt. Returns (tokens, stats).
+
+    on_pass(context_ids, draft_ids, n_accepted, new_ids) is called after every verify pass (for ROLLOUT lines)."""
     ids = torch.tensor([prompt])
     produced, proposed, accepted, passes = [], 0, 0, 0
     while len(produced) < max_new:
         kk = min(k, max_new - len(produced))
         if seq_len is not None and ids.shape[1] + kk + 1 > seq_len:
             break
-        new, n_acc = spec_step(next_target, next_draft, ids, kk, T, gen)
+        new, n_acc, drafts = spec_step(next_target, next_draft, ids, kk, T, gen)
+        if on_pass is not None:
+            on_pass(ids[0].tolist(), drafts[0].tolist(), int(n_acc[0]), new[0])
         passes += 1
         proposed += kk
         accepted += int(n_acc[0])
@@ -136,6 +142,25 @@ def plain_generate(next_target, prompt: list[int], T: float, max_new: int, eos_i
         if eos_id is not None and t == eos_id:
             break
     return produced
+
+
+def make_pass_logger(decode, limit: int):
+    """Returns (state, on_pass). on_pass prints a ROLLOUT line for the first `limit` verify passes:
+    the context tail, the k draft tokens, how many were accepted, and the token that replaced the
+    first rejected draft (sampled from the residual max(0, p - q)) or the bonus token from p_k."""
+    state = {"n": 0, "prompt": 0}
+
+    def on_pass(ctx_ids, draft_ids, n_acc, new_ids):
+        state["n"] += 1
+        if state["n"] > limit:
+            return
+        k = len(draft_ids)
+        C.rollout(step=state["n"], prompt=state["prompt"], context_tail=C.clip_text(decode(ctx_ids[-48:]), 300),
+                  draft=decode(draft_ids), draft_ids=draft_ids, proposed=k, accepted=n_acc, accepted_text=decode(draft_ids[:n_acc]),
+                  corrected_token=decode([new_ids[-1]]), corrected_id=new_ids[-1], correction="residual" if n_acc < k else "bonus",
+                  emitted=decode(new_ids))
+
+    return state, on_pass
 
 
 def total_variation(a: torch.Tensor, b: torch.Tensor, V: int) -> float:
@@ -190,8 +215,10 @@ def smoke(args):
     gen = torch.Generator().manual_seed(args.seed)
     t0 = time.perf_counter()
     spec_tokens = passes = proposed = accepted = 0
+    pl_state, on_pass = make_pass_logger(lambda ids: "".join(tok.itos[int(i)] for i in ids), args.log_passes)
     for i, p in enumerate(prompts):
-        out, st = speculative_generate(nt, nd, p, args.k, args.temperature, args.max_new, tok.eos_id, gen, seq_len)
+        pl_state["prompt"] = i
+        out, st = speculative_generate(nt, nd, p, args.k, args.temperature, args.max_new, tok.eos_id, gen, seq_len, on_pass)
         spec_tokens += len(out)
         passes += st["passes"]
         proposed += st["proposed"]
@@ -208,7 +235,7 @@ def smoke(args):
     N = args.tv_samples
     prefix = torch.tensor([tok.encode("the cat sat on the ")]).repeat(N, 1)
     gen = torch.Generator().manual_seed(args.seed + 7)
-    new, _ = spec_step(nt, nd, prefix, args.k, args.temperature, gen)
+    new, _, _ = spec_step(nt, nd, prefix, args.k, args.temperature, gen)
     spec_first = torch.tensor([row[0] for row in new])
     p0 = F.softmax(nt(prefix[:1])[:, -1, :].float() / args.temperature, -1)[0]
     plain_a = torch.multinomial(p0, N, replacement=True, generator=gen)
@@ -265,11 +292,13 @@ def real(args):
     gen = torch.Generator().manual_seed(args.seed)
     T = args.temperature if do_sample else 1e-4                 # near-greedy when temperature is 0
     passes = proposed = accepted = produced = 0
+    pl_state, on_pass = make_pass_logger(tok.decode, args.log_passes)
     t0 = time.perf_counter()
     for i, t in enumerate(texts):
         ids = tok(t)["input_ids"]
+        pl_state["prompt"] = i
         with torch.no_grad():
-            out, st = speculative_generate(nt, nd, ids, args.k, T, args.max_new, tok.eos_token_id, gen)
+            out, st = speculative_generate(nt, nd, ids, args.k, T, args.max_new, tok.eos_token_id, gen, on_pass=on_pass)
         passes += st["passes"]
         proposed += st["proposed"]
         accepted += st["accepted"]

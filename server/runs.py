@@ -74,13 +74,15 @@ def recipes() -> list[dict[str, Any]]:
         except Exception:
             pass
         out.append({"name": p.stem, "file": f"lab/recipes/{p.name}", "doc": doc[:400]})
+    out.append({"name": "scratch", "file": "", "doc": "Run your own Python (from a chapter's snippet, or pasted): the code is saved with the run and executed on the chosen machine. Print METRIC {...} lines to get charts."})
     return out
 
 
-def _command(executor: str, recipe: str, args: str) -> list[str]:
-    script = RECIPES / f"{recipe}.py"
+def _command(executor: str, recipe: str, args: str, script: Path | None = None) -> list[str]:
+    script = script or (RECIPES / f"{recipe}.py")
     if not script.exists():
         raise ValueError(f"no such recipe: {recipe}")
+    remote_script = f"recipes/{recipe}.py" if script.parent == RECIPES else f"scratch/{script.name}"
     if recipe == "modal_app":
         raise ValueError("modal_app is the Modal wrapper; pick a recipe and the modal executor instead")
     extra = shlex.split(args or "")
@@ -95,11 +97,11 @@ def _command(executor: str, recipe: str, args: str) -> list[str]:
         remote = " && ".join([
             "mkdir -p ~/cortex-lab/out",
             "cd ~/cortex-lab",
-            f"{py} recipes/{recipe}.py " + " ".join(shlex.quote(a) for a in extra),
+            f"{py} {remote_script} " + " ".join(shlex.quote(a) for a in extra),
         ])
         return ["ssh", *SSH_OPTS, host, remote]
     if executor == "modal":
-        return ["modal", "run", str(RECIPES / "modal_app.py"), "--recipe", recipe, "--args", " ".join(extra)]
+        return ["modal", "run", str(RECIPES / "modal_app.py"), "--recipe", recipe if script.parent == RECIPES else str(script), "--args", " ".join(extra)]
     raise ValueError(f"unknown executor: {executor}")
 
 
@@ -214,7 +216,8 @@ def _write_meta(d: Path, meta: dict) -> None:
     (d / "meta.json").write_text(json.dumps(meta, indent=2))
 
 
-def start(recipe: str, args: str = "", executor: str = "local") -> dict[str, Any]:
+def start(recipe: str, args: str = "", executor: str = "local", code: str | None = None) -> dict[str, Any]:
+    """Launch a recipe, or with code= run that Python source as a one-off script (the "scratch" recipe)."""
     ex = executors()
     if executor not in ("local", "ssh", "modal"):
         raise ValueError("executor must be local, ssh, or modal")
@@ -224,6 +227,15 @@ def start(recipe: str, args: str = "", executor: str = "local") -> dict[str, Any
     d = runs_dir() / rid
     d.mkdir(parents=True)
     meta = {"id": rid, "recipe": recipe, "args": args, "executor": executor, "status": "queued", "started": _now(), "ended": None, "exit": None}
+    if code is not None:
+        if not code.strip():
+            raise ValueError("no code given")
+        meta["recipe"] = "scratch"
+        meta["script"] = str(d / f"scratch_{rid}.py")
+        meta["code_preview"] = code.strip().splitlines()[0][:80]
+        Path(meta["script"]).write_text(code)
+    elif recipe == "scratch":
+        raise ValueError("the scratch recipe needs code")
     _write_meta(d, meta)
     threading.Thread(target=_run, args=(d, meta), daemon=True).start()
     return meta
@@ -233,10 +245,15 @@ def _run(d: Path, meta: dict) -> None:
     log = (d / "log.txt").open("a", buffering=1)
     metrics = (d / "metrics.jsonl").open("a", buffering=1)
     try:
+        script = Path(meta["script"]) if meta.get("script") else None
         if meta["executor"] == "ssh":
             log.write("[cortex] syncing recipes to " + os.environ.get("CORTEX_SSH_HOST", "") + "\n")
             _sync_recipes(os.environ["CORTEX_SSH_HOST"])
-        cmd = _command(meta["executor"], meta["recipe"], meta["args"])
+            if script:
+                host = os.environ["CORTEX_SSH_HOST"]
+                subprocess.run(["ssh", *SSH_OPTS, host, "mkdir -p ~/cortex-lab/scratch"], check=True, timeout=60)
+                subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/cm-%r@%h:%p", str(script), f"{host}:~/cortex-lab/scratch/{script.name}"], check=True, timeout=60)
+        cmd = _command(meta["executor"], meta["recipe"], meta["args"], script)
         log.write("[cortex] $ " + " ".join(shlex.quote(c) for c in cmd) + "\n")
         env = dict(os.environ, PYTHONUNBUFFERED="1")
         proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
@@ -253,6 +270,12 @@ def _run(d: Path, meta: dict) -> None:
                     obj = json.loads(s[7:])
                     obj.setdefault("t", time.time())
                     metrics.write(json.dumps(obj) + "\n")
+                except Exception:
+                    pass
+            elif s.startswith("ROLLOUT "):
+                try:
+                    with (d / "rollouts.jsonl").open("a") as rf:
+                        rf.write(json.dumps(json.loads(s[8:])) + "\n")
                 except Exception:
                     pass
             elif s.startswith("RESULT "):
@@ -326,7 +349,7 @@ def _last_metric(d: Path) -> dict | None:
         return None
 
 
-def read_run(rid: str, tail: int = 200, max_metrics: int = 2000) -> dict[str, Any] | None:
+def read_run(rid: str, tail: int = 200, max_metrics: int = 2000, max_rollouts: int = 64) -> dict[str, Any] | None:
     d = runs_dir() / rid
     if not (d / "meta.json").exists():
         return None
@@ -342,13 +365,21 @@ def read_run(rid: str, tail: int = 200, max_metrics: int = 2000) -> dict[str, An
     if len(metrics) > max_metrics:  # thin evenly so charts stay light
         step = len(metrics) / max_metrics
         metrics = [metrics[int(i * step)] for i in range(max_metrics)]
+    rollouts: list[dict] = []
+    if (d / "rollouts.jsonl").exists():
+        lines = (d / "rollouts.jsonl").read_text().splitlines()[-max_rollouts:]
+        for line in lines:
+            try:
+                rollouts.append(json.loads(line))
+            except Exception:
+                pass
     result = None
     if (d / "result.json").exists():
         try:
             result = json.loads((d / "result.json").read_text())
         except Exception:
             pass
-    return {**meta, "log": log_lines[-tail:], "log_lines": len(log_lines), "metrics": metrics, "result": result}
+    return {**meta, "log": log_lines[-tail:], "log_lines": len(log_lines), "metrics": metrics, "rollouts": rollouts, "result": result}
 
 
 def delete_run(rid: str) -> bool:

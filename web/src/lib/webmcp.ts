@@ -300,6 +300,16 @@ export const webmcpTools: ModelContextTool[] = [
     },
   },
   {
+    name: "run_code",
+    description: "Run a Python snippet (for example a chapter's 'Build it small' block, edited) as a one-off job on the user's GPU box (executor ssh, default), Modal, or locally, and open the run so the person watches the output. Print METRIC {\"step\":..} lines to get charts. Only when the user asks to run code.",
+    inputSchema: { type: "object", properties: { code: { type: "string" }, executor: { type: "string" }, args: { type: "string" } }, required: ["code"] },
+    execute: async (i) => {
+      const r = await api.lab.start({ recipe: "scratch", code: s(i.code, 60000), executor: s(i.executor || "ssh", 10), args: s(i.args || "", 500) });
+      changed(); navigate({ kind: "lab", run: r.id }); record("run_code", i, true, `code on ${r.executor} · ${r.id}`);
+      return text(r);
+    },
+  },
+  {
     name: "read_run",
     description: "Read a run: status, parsed metrics (thinned), final result, and the last log lines.",
     inputSchema: { type: "object", properties: { id: { type: "string" }, tail: { type: "integer" } }, required: ["id"] },

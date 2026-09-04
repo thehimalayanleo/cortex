@@ -63,7 +63,15 @@ export function LabView({ station, runId, plan, refresh }: { station?: string; r
             </button>
           ))}
         </div>
-        <span className="muted small">Train small models here; run the real thing on a GPU; the agent gets the same buttons.</span>
+        <details className="lab-howto">
+          <summary className="muted small">How to use this</summary>
+          <ol>
+            <li><b>My plan</b> is the path: cards in order, one chapter at a time. Move a card when you finish it; the chat can do it for you after a quiz.</li>
+            <li><b>In the browser</b> is where you watch training happen. Every station has one Train button and one number to watch, named in its first paragraph.</li>
+            <li><b>Chapters</b> are the theory, written to be read start to finish. Each has a short snippet you can run with the "Run on GPU" button, and a self-test.</li>
+            <li><b>GPU runs</b> is the real thing: the same ideas as full scripts on your 5090. Loss curves and exact rollouts stream in while it trains.</li>
+          </ol>
+        </details>
       </header>
       {tab === "stations" && <Stations station={station} />}
       {tab === "chapters" && <Chapters chapters={chapters.data} loading={chapters.loading} error={chapters.error} />}
@@ -225,7 +233,7 @@ function Runs({ runId, refresh }: { runId?: string; refresh: number }) {
               <button className={`lab-run ${selected === r.id ? "on" : ""}`} onClick={() => { setSelected(r.id); navigate({ kind: "lab", run: r.id }); }}>
                 <span className={`dot ${r.status}`} aria-hidden="true" />
                 <span className="ttl">
-                  {r.recipe} <span className="muted">{r.args}</span>
+                  {r.recipe} <span className="muted">{r.recipe === "scratch" ? r.code_preview : r.args}</span>
                 </span>
                 <span className="meta">
                   {r.executor} · {r.status}
@@ -329,6 +337,8 @@ function RunDetail({ id, onGone }: { id: string; onGone: () => void }) {
           ))}
         </div>
       )}
+      {run.rollouts && run.rollouts.length > 0 && <Rollouts rows={run.rollouts} />}
+      {run.script && <ScriptView id={run.id} preview={run.code_preview} />}
       {run.result && (
         <details className="lab-result" open>
           <summary>Result</summary>
@@ -567,5 +577,68 @@ function Plan({ refresh }: { refresh: number }) {
         ))}
       </div>
     </div>
+  );
+}
+
+
+/** Exact rollouts: what the policy actually sampled, what it scored, and the advantage it was trained on. */
+function Rollouts({ rows }: { rows: Record<string, unknown>[] }) {
+  const steps = Array.from(new Set(rows.map((r) => Number(r.step ?? 0)))).sort((a, b) => b - a);
+  const [step, setStep] = useState<number | null>(null);
+  const cur = step ?? steps[0];
+  const shown = rows.filter((r) => Number(r.step ?? 0) === cur);
+  const skip = new Set(["step", "group", "idx", "prompt", "completion", "chosen", "rejected", "advantage", "reward"]);
+  const extra = Array.from(new Set(shown.flatMap((r) => Object.keys(r).filter((k) => !skip.has(k) && typeof r[k] === "number"))));
+  const fmt = (v: unknown) => (typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(3)) : String(v ?? ""));
+  return (
+    <details className="lab-result lab-rollouts" open>
+      <summary>
+        Rollouts · step{" "}
+        <select className="select sm" value={cur} onChange={(e) => setStep(Number(e.target.value))} onClick={(e) => e.stopPropagation()}>
+          {steps.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>{" "}
+        <span className="muted">{shown.length} samples; sorted by advantage</span>
+      </summary>
+      <div className="rollout-list">
+        {shown
+          .slice()
+          .sort((a, b) => Number(b.advantage ?? b.reward ?? 0) - Number(a.advantage ?? a.reward ?? 0))
+          .map((r, i) => (
+            <div key={i} className={`rollout ${Number(r.advantage ?? 0) >= 0 ? "up" : "down"}`}>
+              <div className="rollout-head">
+                <b>reward {fmt(r.reward)}</b>
+                {r.advantage != null && <span>adv {fmt(r.advantage)}</span>}
+                {extra.map((k) => (
+                  <span key={k} className="muted">
+                    {k} {fmt(r[k])}
+                  </span>
+                ))}
+              </div>
+              {r.prompt != null && <pre className="rollout-prompt">{String(r.prompt)}</pre>}
+              {r.completion != null && <pre className="rollout-completion">{String(r.completion)}</pre>}
+              {r.chosen != null && (
+                <div className="rollout-pair">
+                  <pre className="rollout-completion">chosen: {String(r.chosen)}</pre>
+                  <pre className="rollout-completion">rejected: {String(r.rejected ?? "")}</pre>
+                </div>
+              )}
+            </div>
+          ))}
+      </div>
+    </details>
+  );
+}
+
+function ScriptView({ id, preview }: { id: string; preview?: string }) {
+  const [code, setCode] = useState<string | null>(null);
+  return (
+    <details className="lab-result" onToggle={(e) => { if ((e.target as HTMLDetailsElement).open && code == null) api.lab.script(id).then((r) => setCode(r.code)).catch(() => setCode("(could not load)")); }}>
+      <summary>Script · {preview}</summary>
+      <pre>{code ?? "…"}</pre>
+    </details>
   );
 }

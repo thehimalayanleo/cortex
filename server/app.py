@@ -413,6 +413,7 @@ class RunIn(BaseModel):
     recipe: str
     args: str | None = ""
     executor: str | None = "local"
+    code: str | None = None  # run this Python source instead of a named recipe
 
 
 @app.get("/api/lab/executors")
@@ -468,17 +469,25 @@ def lab_runs(limit: int = 50):
 @app.post("/api/lab/runs")
 def lab_run_start(r: RunIn):
     try:
-        return runs.start(r.recipe, r.args or "", r.executor or "local")
+        return runs.start(r.recipe, r.args or "", r.executor or "local", r.code)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 
 @app.get("/api/lab/runs/{rid}")
-def lab_run_get(rid: str, tail: int = 200):
-    r = runs.read_run(rid, tail)
+def lab_run_get(rid: str, tail: int = 200, rollouts: int = 64):
+    r = runs.read_run(rid, tail, max_rollouts=rollouts)
     if not r:
         raise HTTPException(404, "no such run")
     return r
+
+
+@app.get("/api/lab/runs/{rid}/script")
+def lab_run_script(rid: str):
+    r = runs.read_run(rid, tail=1)
+    if not r or not r.get("script"):
+        raise HTTPException(404, "no script for this run")
+    return {"code": Path(r["script"]).read_text(errors="ignore")}
 
 
 @app.post("/api/lab/runs/{rid}/stop")

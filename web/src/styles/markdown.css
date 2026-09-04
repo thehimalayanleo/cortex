@@ -149,3 +149,9 @@
 .md details{border:1px solid var(--border);border-radius:8px;padding:6px 12px;margin:8px 0;background:var(--surface)}
 .md details summary{cursor:pointer;color:var(--accent-text);font-weight:500}
 .md details[open] summary{margin-bottom:6px}
+
+.md .codeblock{position:relative;margin:10px 0}
+.md .codeblock pre{margin:0;border-top-left-radius:0;border-top-right-radius:0}
+.md .codebar{display:flex;align-items:center;justify-content:space-between;background:var(--surface-2);border:1px solid var(--border);border-bottom:0;border-radius:8px 8px 0 0;padding:3px 8px 3px 10px;font:11px var(--mono);color:var(--text-3)}
+.md .codebar .run-code{font:500 11.5px var(--sans);color:var(--on-accent);background:var(--accent);border:0;border-radius:6px;padding:3px 9px;cursor:pointer}
+.md .codebar .run-code:hover{filter:brightness(1.08)}

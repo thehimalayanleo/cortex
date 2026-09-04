@@ -542,3 +542,18 @@
 .lab-plan-head .score{font:12px var(--mono);color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
 .lab-plan-head .score b{color:var(--accent);font-weight:600}
 .lab-plan-head .score.hot{border-color:var(--accent)}
+
+.rollout-list{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow:auto;margin-top:6px}
+.rollout{border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:8px;padding:6px 10px;background:var(--bg)}
+.rollout.up{border-left-color:#3fa46a}.rollout.down{border-left-color:#d0453f}
+.rollout-head{display:flex;gap:12px;flex-wrap:wrap;font:12px var(--mono);color:var(--muted)}
+.rollout-head b{color:var(--ink)}
+.rollout-prompt,.rollout-completion{margin:4px 0 0;font:12px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word}
+.rollout-prompt{color:var(--faint)}
+.rollout-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+.lab-howto{font-size:13px;color:var(--muted);max-width:70ch}
+.lab-howto summary{cursor:pointer}
+.lab-howto ol{margin:6px 0 0 18px;padding:0}
+.lab-howto li{margin:4px 0}
+.lab-howto b{color:var(--ink);font-weight:600}

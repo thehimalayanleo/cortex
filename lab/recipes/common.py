@@ -3,7 +3,7 @@
 Every recipe imports this module. It holds the pieces that are the same
 across recipes so each recipe file can stay focused on one algorithm:
 
-  * the stdout protocol the Cortex server parses (METRIC / STATUS / RESULT)
+  * the stdout protocol the Cortex server parses (METRIC / STATUS / RESULT / ROLLOUT)
   * seeding and device selection
   * the synthetic corpus that the in-browser lab (lab/index.html) uses, so the
     numbers you see in the browser and in a --smoke run come from the same text
@@ -62,6 +62,20 @@ def result(**fields) -> None:
     """Print the single final `RESULT {...}` line."""
     rec = {k: (_num(v) if isinstance(v, (int, float, torch.Tensor)) else v) for k, v in fields.items()}
     print("RESULT " + json.dumps(rec), flush=True)
+
+
+def rollout(**fields) -> None:
+    """Print one `ROLLOUT {...}` line: a sampled completion (or a verify pass, or a preference pair)
+    with the numbers that scored it, so the UI can show what the policy is actually producing.
+    Strings pass through; tensors and floats are cleaned like METRIC values."""
+    rec = {k: (_num(v) if isinstance(v, (int, float, torch.Tensor)) else v) for k, v in fields.items()}
+    print("ROLLOUT " + json.dumps(rec, ensure_ascii=False), flush=True)
+
+
+def clip_text(s: str, n: int) -> str:
+    """Truncate a string to n characters for ROLLOUT lines (marks the cut with an ellipsis)."""
+    s = str(s)
+    return s if len(s) <= n else s[: max(0, n - 1)] + "\u2026"
 
 
 def log(msg: str) -> None:

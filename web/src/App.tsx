@@ -157,6 +157,26 @@ function Shell() {
     return () => window.clearInterval(id);
   }, [toast]);
 
+  // "Run on GPU" buttons inside rendered markdown (the chapters' snippets): a one-off scratch run on the best executor.
+  useEffect(() => {
+    const onRun = async (e: Event) => {
+      const code = String((e as CustomEvent).detail?.code ?? "");
+      if (!code.trim()) return;
+      try {
+        const ex = await api.lab.executors();
+        const executor = ex.ssh.available ? "ssh" : ex.modal.available ? "modal" : "local";
+        const r = await api.lab.start({ recipe: "scratch", code, executor });
+        toast(`Running the snippet on ${executor === "ssh" ? ex.ssh.host ?? "your GPU box" : executor}`);
+        emitCommand("vault-changed");
+        navigate({ kind: "lab", run: r.id });
+      } catch (err) {
+        toast(errorMessage(err), "error");
+      }
+    };
+    window.addEventListener("cortex:run-code", onRun);
+    return () => window.removeEventListener("cortex:run-code", onRun);
+  }, [toast]);
+
   // "Ask about this paper": make sure the chat is visible before the panel takes the draft.
   useEffect(() => {
     const onAsk = () => {

@@ -35,10 +35,20 @@ DEFAULT_MODEL = os.environ.get("CORTEX_MODEL", "glm-5.3")
 _client: OpenAI | None = None
 
 
+# OpenCode Go groups requests by an x-opencode-session header; one stable id per chat channel keeps a conversation
+# in one session, and a per-process id covers everything else (highlights, model list).
+_PROCESS_SESSION = uuid.uuid4().hex
+
+
+def session_headers(key: str | None = None) -> dict[str, str]:
+    sid = uuid.uuid5(uuid.NAMESPACE_URL, f"cortex:{vault.VAULT}:{key}").hex if key else _PROCESS_SESSION
+    return {"x-opencode-session": sid}
+
+
 def client() -> OpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(base_url=BASE_URL, api_key=_load_key() or "missing", default_headers={"User-Agent": UA})
+        _client = OpenAI(base_url=BASE_URL, api_key=_load_key() or "missing", default_headers={"User-Agent": UA, **session_headers()})
     return _client
 
 
@@ -97,6 +107,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}}},
     {"type": "function", "function": {"name": "start_run", "description": "Launch a lab recipe (a training or evaluation script under lab/recipes, for example pretrain_nano, sft_lora, dpo, grpo_tool, embed_contrastive, eval_suite, redteam_suite, kernel_bench, optim_bench, paint_grpo, lean_eval) on an executor: local (this machine), ssh (the user's GPU box), or modal (rented GPU). args is the script's command line, e.g. '--smoke --steps 200'. Only when the user asks to train, run, or benchmark something.",
         "parameters": {"type": "object", "properties": {"recipe": {"type": "string"}, "args": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh", "modal"]}}, "required": ["recipe"]}}},
+    {"type": "function", "function": {"name": "run_code", "description": "Run a Python script the user wrote or a chapter's 'Build it small' snippet on an executor (local|ssh|modal). Save nothing else; print METRIC {\"step\":..} lines from the code to get charts. Returns the run id; read it with read_run. Only when the user asks to run code.",
+        "parameters": {"type": "object", "properties": {"code": {"type": "string"}, "executor": {"type": "string", "enum": ["local", "ssh", "modal"]}, "args": {"type": "string"}}, "required": ["code"]}}},
     {"type": "function", "function": {"name": "read_run", "description": "Read a run: status, the parsed metrics (loss curves etc.), the final result, and the last log lines.",
         "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "tail": {"type": "integer"}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
@@ -171,7 +183,7 @@ def extract_highlights(pid: str, model: str | None = None, force: bool = False, 
         '{"kind": one of theorem|result|claim|method|limitation, "quote": "<verbatim>", "why": "<one line on why it matters>"}. '
         "Order by importance.\n\nPAPER TEXT:\n" + body
     )
-    resp = client().chat.completions.create(model=model or DEFAULT_MODEL, messages=[{"role": "user", "content": prompt}], temperature=0.1)
+    resp = client().chat.completions.create(model=model or DEFAULT_MODEL, messages=[{"role": "user", "content": prompt}], temperature=0.1, extra_headers=session_headers(f"highlights:{pid}"))
     raw = (resp.choices[0].message.content or "").strip()
     m = re.search(r"\[[\s\S]*\]", raw)
     try:
@@ -325,6 +337,10 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         from . import runs
         m = runs.start(str(a["recipe"]), str(a.get("args") or ""), str(a.get("executor") or "local"))
         return m, f"{m['recipe']} on {m['executor']} · {m['id']}", f"cortex://lab/run/{m['id']}"
+    if name == "run_code":
+        from . import runs
+        m = runs.start("scratch", str(a.get("args") or ""), str(a.get("executor") or "ssh"), code=str(a["code"]))
+        return m, f"code on {m['executor']} · {m['id']}", f"cortex://lab/run/{m['id']}"
     if name == "read_run":
         from . import runs
         r = runs.read_run(str(a["id"]), int(a.get("tail") or 60))
@@ -332,14 +348,14 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
             raise ValueError(f"no run {a['id']}")
         m = r["metrics"]
         thin = m if len(m) <= 60 else [m[int(i * len(m) / 60)] for i in range(60)] + [m[-1]]
-        return {**{k: r[k] for k in ("id", "recipe", "args", "executor", "status", "started", "ended", "exit")}, "result": r.get("result"), "metrics": thin, "log": r["log"]}, f"run {r['id']} · {r['status']}", f"cortex://lab/run/{r['id']}"
+        return {**{k: r[k] for k in ("id", "recipe", "args", "executor", "status", "started", "ended", "exit")}, "result": r.get("result"), "metrics": thin, "rollouts": r.get("rollouts", [])[-16:], "log": r["log"]}, f"run {r['id']} · {r['status']}", f"cortex://lab/run/{r['id']}"
     if name == "run_agent":
         out = agents.run_capture(str(a["agent"]), str(a["task"]))
         return {"output": out}, f"{a['agent']}: {str(a['task'])[:70]}", ""
     raise ValueError(f"unknown tool {name}")
 
 
-WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move"}
+WRITE_TOOLS = {"write_note", "append_daily", "file_paper", "set_paper", "update_project", "run_agent", "start_run", "gpu_setup", "lab_plan_move", "run_code"}
 
 
 def system_prompt(channel: str) -> str:
@@ -413,7 +429,7 @@ def stream(channel: str, content: str, model: str | None = None, context: dict |
     text_all, trace = "", []
     try:
         for _round in range(8):
-            resp = client().chat.completions.create(model=model, messages=messages, tools=TOOLS, stream=True, temperature=0.3)
+            resp = client().chat.completions.create(model=model, messages=messages, tools=TOOLS, stream=True, temperature=0.3, extra_headers=session_headers(f"chat:{channel}"))
             round_text, calls = "", {}
             for chunk in resp:
                 if not chunk.choices:

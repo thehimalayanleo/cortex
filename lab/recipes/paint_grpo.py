@@ -208,6 +208,14 @@ def warm_start(policy, tok, steps, n_programs, seed, device):
     C.log(f"warm-up loss {loss.item():.3f}")
 
 
+def log_group(step, prompt, texts, rewards, adv, parts, kl_seq, G):
+    """One ROLLOUT line per sample of the first group of this step (rows 0..G-1)."""
+    for i in range(G):
+        C.rollout(step=step, group=0, idx=i, prompt=C.clip_text(prompt, 300), completion=C.clip_text(texts[i], 600),
+                  reward=float(rewards[i]), advantage=float(adv[i]), gate=parts[i]["gate"], length=parts[i]["length"],
+                  similarity=parts[i]["similarity"], kl=float(kl_seq[i]), n_commands=len(parse(texts[i])))
+
+
 def smoke(args, ref):
     device = C.pick_device(args.device)
     tok = C.CharTokenizer()
@@ -227,7 +235,7 @@ def smoke(args, ref):
     for step in range(1, args.steps + 1):
         policy.eval()
         out = C.generate(policy, prompt, args.max_new, temperature=args.temperature, eos_id=tok.eos_id)
-        seqs, flags, rewards, parts = [], [], [], []
+        seqs, flags, rewards, parts, texts = [], [], [], [], []
         for row in out:
             comp = row[P:].tolist()
             if tok.eos_id in comp:
@@ -240,6 +248,7 @@ def smoke(args, ref):
             flags.append([0] * P + [1] * len(comp))
             rewards.append(r)
             parts.append(pr)
+            texts.append(text)
         ids, _ = C.pad_batch(seqs, tok.pad_id)
         cm, _ = C.pad_batch(flags, 0)
         ids, m = ids.to(device), cm[:, 1:].float().to(device)
@@ -263,6 +272,9 @@ def smoke(args, ref):
         with torch.no_grad():
             kl_mean = ((kl * m).sum() / m.sum()).item()
             clip_frac = ((((ratio - 1).abs() > args.eps_clip).float() * m).sum() / m.sum()).item()
+            kl_seq = (kl * m).sum(1) / m.sum(1).clamp(min=1)
+        if args.log_rollouts_every and (step % args.log_rollouts_every == 0 or step == 1):
+            log_group(step, PROMPT, texts, rewards, adv, parts, kl_seq, args.group)
         C.metric(step, loss=loss.item(), reward_mean=float(np.mean(rewards)), reward_best=best[0], reward_std=float(np.std(rewards)),
                  gate_rate=float(np.mean([p["gate"] for p in parts])), similarity=float(np.mean([p["similarity"] for p in parts])),
                  kl=kl_mean, clip_frac=clip_frac, completion_len=m.sum(1).mean().item())
@@ -290,15 +302,31 @@ def real(args, ref):
     ds = datasets.Dataset.from_list(rows)
     best = {"reward": -1.0, "program": "", "img": None}
 
-    def paint_reward(completions, **kw):
-        out = []
+    calls = {"n": 0}
+
+    def paint_reward(completions, prompts=None, **kw):
+        out, parts_all, texts = [], [], []
         for c in completions:
             text = c[-1]["content"] if isinstance(c, list) else c
             text = text.replace("```", "").strip()
-            r, _, img = reward(text, ref)
+            r, parts, img = reward(text, ref)
             if r > best["reward"]:
                 best.update(reward=r, program=text, img=img)
             out.append(r)
+            parts_all.append(parts)
+            texts.append(text)
+        # ROLLOUT lines for the first group (TRL keeps a prompt's completions contiguous); the advantage is
+        # the group normalization computed here for display, one reward call per generation step.
+        calls["n"] += 1
+        if args.log_rollouts_every and calls["n"] % args.log_rollouts_every == 0:
+            G = min(args.group, len(out))
+            grp = torch.tensor(out[:G])
+            adv = (grp - grp.mean()) / (grp.std() + 1e-4) if G > 1 else grp * 0
+            for i in range(G):
+                pr = prompts[i] if prompts else ""
+                q = pr[-1]["content"] if isinstance(pr, list) and pr else pr
+                C.rollout(step=calls["n"], group=0, idx=i, prompt=C.clip_text(q, 300), completion=C.clip_text(texts[i], 600),
+                          reward=out[i], advantage=float(adv[i]), n_commands=len(parse(texts[i])), **parts_all[i])
         return out
 
     sig = inspect.signature(trl.GRPOConfig.__init__).parameters
@@ -338,6 +366,8 @@ def main():
     p.add_argument("--n-prompts", type=int, default=512, help="real: dataset rows (all the same prompt)")
     p.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
     p.add_argument("--lora-r", type=int, default=16)
+    p.add_argument("--log-rollouts-every", type=int, default=5,
+                   help="every N steps print one ROLLOUT line per sample of the first group (0 disables)")
     args = p.parse_args()
     d = dict(steps=60, group=4, batch=4, lr=5e-4, max_new=100) if args.smoke else dict(steps=200, group=8, batch=1, lr=5e-5, max_new=256)
     for k, v in d.items():

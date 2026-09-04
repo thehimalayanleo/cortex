@@ -260,7 +260,7 @@ The single most useful diagnostic plot is $\alpha$ per position within a round (
 
 3. Derive the variance of $N$ under the independence model and compare it with the empirical variance of tokens per pass from the snippet (record the per-round counts). Check: $\mathbb{E}[N^2] = \sum_{j=0}^{k} (2j + 1)\alpha^j$, and the empirical variance is larger when acceptances are correlated.
 
-4. For a bf16 7B target on the 5090 (assume $T(1) = 10$ ms at batch 1) and a draft with measured $c = 0.25$, tabulate $S(k, \alpha, c)$ for $k \in \{1, \dots, 8\}$ and $\alpha \in \{0.5, 0.7, 0.9\}$ and read off the best $k$ for each. Check: at $\alpha = 0.5$ the best $k$ is 2 or 3 and the speedup is under 1.4; at $\alpha = 0.9$ it is $k = 6$ to $8$ and about 2.5.
+4. For a bf16 7B target on the 5090 (assume $T(1) = 10$ ms at batch 1) and a draft with measured $c = 0.25$, tabulate $S(k, \alpha, c)$ for $k \in \{1, \dots, 8\}$ and $\alpha \in \{0.5, 0.7, 0.9\}$ and read off the best $k$ for each. Check: at $\alpha = 0.5$ the best $k$ is 1 or 2 and the speedup is about 1.2; at $\alpha = 0.7$ it is $k = 2$ and about 1.46; at $\alpha = 0.9$ it is $k = 5$ to $6$ and about 2.1. A draft this expensive relative to the target needs a high $\alpha$ to pay at all.
 
 5. Write the tree version of the snippet for a binary tree of depth 2 (two candidates at position 1, two children each), using SpecInfer's rule that a rejected sibling's mass is removed from the residual before its sibling is tried. Check: the chi-square test still passes, and tokens per pass rises over the chain version at the same $\alpha$.
 

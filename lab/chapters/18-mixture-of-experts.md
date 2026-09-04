@@ -58,7 +58,7 @@ $$
 \mathbb{E}[\text{experts touched}] = E \left(1 - \left(1 - \tfrac{k}{E}\right)^{B}\right),
 $$
 
-which for $E = 8$, $k = 2$ is 2 at $B = 1$, 4.6 at $B = 3$, 7.2 at $B = 8$, and 7.97 at $B = 16$. By batch 8 the step reads almost all 45B expert parameters, and the byte count is that of a 47B dense model while the arithmetic is that of a 13B one. This is the inference-side version of the active-versus-total distinction: FLOPs scale with active, memory and, above a small batch, memory traffic scale with total.
+which for $E = 8$, $k = 2$ is 2 at $B = 1$, 4.6 at $B = 3$, 7.2 at $B = 8$, and 7.9 at $B = 16$. By batch 8 the step reads almost all 45B expert parameters, and the byte count is that of a 47B dense model while the arithmetic is that of a 13B one. This is the inference-side version of the active-versus-total distinction: FLOPs scale with active, memory and, above a small batch, memory traffic scale with total.
 
 ### Load balancing
 
@@ -255,7 +255,7 @@ Cost: tokens per second against the dense-active control (the dispatch overhead)
 
 ## Exercises
 
-1. Compute total and active parameters for an MoE with $d = 2048$, $d_{ff} = 5632$, $E = 16$, $k = 2$, 24 layers, $H = 16$, $H_{kv} = 4$, $V = 32000$, untied. Check: per expert $3 \times 2048 \times 5632 = 34.6$M; per layer total about $16 \times 34.6 + 16.8$ (attention, with GQA) $\approx 570$M and active about $2 \times 34.6 + 16.8 \approx 86$M; totals about 13.8B and 2.2B including the two vocabulary matrices.
+1. Compute total and active parameters for an MoE with $d = 2048$, $d_{ff} = 5632$, $E = 16$, $k = 2$, 24 layers, $H = 16$, $H_{kv} = 4$, $V = 32000$, untied. Check: per expert $3 \times 2048 \times 5632 = 34.6$M; attention with GQA $2048 \times 2048 \times 2 + 2 \times 2048 \times 512 = 10.5$M; per layer total about $16 \times 34.6 + 10.5 \approx 564$M and active about $2 \times 34.6 + 10.5 \approx 80$M; totals about 13.7B and 2.0B including the two vocabulary matrices ($2 \times 32000 \times 2048 = 131$M).
 
 2. Show that $\sum_e f_e P_e \ge 1/E$ when $P = f$ and find the minimizer. Then construct $f \ne P$ with $\sum_e f_e P_e < 1/E$ and explain why the loss can read below 1 in the snippet's $\alpha = 0.1$ run. Check: Cauchy-Schwarz gives the bound with equality at uniform; with $f = (1, 0)$ and $P = (0.4, 0.6)$ for $E = 2$ the sum is 0.4 and $E$ times it is 0.8; soft probabilities flatter than hard loads give a value below 1.
 
@@ -263,7 +263,7 @@ Cost: tokens per second against the dense-active control (the dispatch overhead)
 
 4. Implement the per-expert bias update in the snippet (bias enters `topk` only, updated by $\pm \gamma$ after each step from the batch load) with the balance loss off. Check: on the 80/20 mixture the load flattens to within a few percent of uniform while the usage matrix keeps a visible domain structure and the error is closer to the $\alpha = 0$ run than to the $\alpha = 0.1$ run.
 
-5. For Mixtral at 4-bit weights (assume 0.55 bytes per expert parameter including scales) on the 5090 with everything resident, compute the decode byte bound per token at batch 1, 4, and 16 using the experts-touched formula, and the resulting tokens per second at $\beta = 1.525$ TB/s. Check: expert bytes per layer touched are about $0.55 \times 176$M times 2, 5.6, and 7.97 experts; per-token bytes at batch 1 about 7.6 GB including attention, so a bound near 200 tokens per second per stream at batch 1 and a much smaller per-stream figure at batch 16 even though aggregate throughput rises.
+5. For Mixtral at 4-bit weights (assume 0.55 bytes per expert parameter including scales) on the 5090 with everything resident, compute the decode byte bound per token at batch 1, 4, and 16 using the experts-touched formula, and the resulting tokens per second at $\beta = 1.525$ TB/s. Check: expert bytes per layer are about $0.55 \times 176$M times 2, 5.5, and 7.9 experts touched; with attention and the vocabulary matrices left in bf16, the step reads about 9.4 GB at batch 1 (a bound near 160 tokens per second for the single stream), 20 GB at batch 4 (about 75 per stream, 300 aggregate), and 28 GB at batch 16 (about 55 per stream, 880 aggregate). Per-stream speed falls as the batch touches more experts, while aggregate throughput still rises.
 
 6. On the 5090, run `recipes/moe_nano.py` with `--balance aux` at coefficients 0, 0.01, and 0.1, and `--dense`, all at matched tokens, two seeds each. Check: the coefficient-0 run either collapses or specialises depending on `--router-init`; the 0.01 run has the best minority-domain loss; the 0.1 run's usage matrix is flat and its losses approach the dense control's; and the seed-to-seed spread is reported next to every difference you claim.
 

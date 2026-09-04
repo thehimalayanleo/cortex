@@ -151,7 +151,7 @@ def build_parser():
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--max-new", type=int, default=None)
-    p.add_argument("--warm-steps", type=int, default=250, help="smoke: SFT steps on demonstrations before RL (keep it short: a memorized policy has no sampling variance and GRPO gets zero advantage)")
+    p.add_argument("--warm-steps", type=int, default=200, help="smoke: SFT steps on demonstrations before RL (keep it short: a memorized policy has no sampling variance and GRPO gets zero advantage)")
     p.add_argument("--warm-tasks", type=int, default=150, help="smoke: number of demonstrations for the warm-up")
     p.add_argument("--n-tasks", type=int, default=300)
     p.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
@@ -257,6 +257,7 @@ def smoke(args):
     rng = random.Random(args.seed)
     C.status("train", f"GRPO: {args.steps} steps, {args.batch} prompts x G={args.group}, mu={args.mu}, beta={args.beta}")
     t = C.Timer()
+    reward_trace = []
     for step in range(1, args.steps + 1):
         batch = rng.sample(tasks, args.batch)
         ids, cmask, rewards, parts, texts = rollout(policy, tok, batch, args.group, args.max_new, args.temperature, device)
@@ -284,6 +285,7 @@ def smoke(args):
         with torch.no_grad():
             clip_frac = (((ratio - 1).abs() > args.eps_clip).float() * m).sum() / m.sum()
             kl_mean = (kl * m).sum() / m.sum()
+        reward_trace.append(rewards.mean().item())
         fields = dict(loss=loss.item(), reward_mean=rewards.mean(), reward_std=rewards.std(), kl=kl_mean, clip_frac=clip_frac,
                       completion_len=m.sum(1).mean(), zero_var_groups=(r.std(1) < 1e-6).float().mean(),
                       frac_parse=sum(p["parse"] for p in parts) / len(parts), frac_tool=sum(p["tool"] for p in parts) / len(parts),
@@ -298,7 +300,9 @@ def smoke(args):
     r1, parts1 = greedy_eval(policy, tok, eval_tasks, args.max_new, device)
     path = C.save_checkpoint(os.path.join(args.out, "ckpt.pt"), policy, tok, args.steps)
     C.status("done", f"saved {path}")
-    C.result(reward_greedy_before=r0, reward_greedy_after=r1, **{f"before_{k}": v for k, v in parts0.items()},
+    k = max(1, len(reward_trace) // 3)
+    C.result(reward_greedy_before=r0, reward_greedy_after=r1, sampled_reward_first_third=sum(reward_trace[:k]) / k,
+             sampled_reward_last_third=sum(reward_trace[-k:]) / k, **{f"before_{k}": v for k, v in parts0.items()},
              **{f"after_{k}": v for k, v in parts1.items()}, steps=args.steps, checkpoint=path)
 
 

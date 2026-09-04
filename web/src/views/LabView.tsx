@@ -11,7 +11,7 @@ import { useAsync } from "../lib/hooks";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
 
-export const LAB_STATIONS = ["overview", "data", "pretrain", "midtrain", "posttrain", "encoder", "cluster", "paint"] as const;
+export const LAB_STATIONS = ["overview", "data", "pretrain", "midtrain", "posttrain", "encoder", "cluster", "paint", "speculative", "moe"] as const;
 
 /** Ask the embedded lab page to do something; resolves with its reply. Used by the WebMCP tools too. */
 export function labMessage(msg: Record<string, unknown>, timeoutMs = 4000): Promise<Record<string, unknown>> {

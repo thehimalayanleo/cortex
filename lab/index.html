@@ -58,6 +58,7 @@ h2{font:700 30px/1.15 var(--display);letter-spacing:-.02em;margin:6px 0 10px;tex
 .stat b{color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
 canvas.chart{width:100%;height:190px;display:block;background:var(--panel-2);border-radius:10px}
 canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);border-radius:10px}
+.moe-usage{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin:8px 0;font:11.5px var(--mono);color:var(--muted)}.moe-usage .bars{display:flex;gap:4px;height:22px}.moe-usage .bars span{flex:1;background:var(--panel-2);border-radius:4px;position:relative;overflow:hidden}.moe-usage .bars span i{position:absolute;left:0;bottom:0;width:100%;background:var(--accent);opacity:.85}.moe-usage .bars span b{position:absolute;left:0;right:0;top:3px;text-align:center;font:10px var(--mono);color:var(--ink);font-weight:500}
 .paint-row{display:flex;gap:14px;margin:6px 0 10px}.paint-cell{display:flex;flex-direction:column;align-items:center;gap:4px;font:11px var(--mono);color:var(--faint)}.paint-cell canvas{border:1px solid var(--line);border-radius:6px;image-rendering:pixelated;background:#fff}
 .paint-group{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}.paint-group .c{display:flex;flex-direction:column;align-items:center;font:10.5px var(--mono);color:var(--muted)}.paint-group canvas{width:56px;height:56px;border:1px solid var(--line);border-radius:4px;image-rendering:pixelated;background:#fff}.paint-group .c.best canvas{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 .sample{font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;background:var(--panel-2);border-radius:10px;padding:10px 12px;min-height:64px;color:var(--ink)}
@@ -97,6 +98,8 @@ canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);bord
     <a class="st" href="#encoder" data-st="encoder"><b>5 · Encoder</b>Masked LM to embeddings</a>
     <a class="st" href="#cluster" data-st="cluster"><b>6 · Cluster</b>k-means on the embeddings</a>
     <a class="st" href="#paint" data-st="paint"><b>7 · Paint</b>RL with a rendered reward</a>
+    <a class="st" href="#speculative" data-st="speculative"><b>8 · Speculative</b>Draft, then verify in one pass</a>
+    <a class="st" href="#moe" data-st="moe"><b>9 · MoE</b>Route tokens to experts</a>
     <div class="foot">
       <div>backend <b id="backend">…</b></div>
       <div>params per toy model <b id="nparams">…</b></div>
@@ -118,6 +121,8 @@ canvas.sq{width:100%;aspect-ratio:1;display:block;background:var(--panel-2);bord
         <a href="#encoder"><b>Encoder</b><small>bidirectional, masked LM, then contrastive pairs → embeddings</small></a>
         <a href="#cluster"><b>Cluster</b><small>k-means over the embedding cloud, purity vs the true topics</small></a>
         <a href="#paint"><b>Paint with code</b><small>a policy writes drawing programs; render, score against a reference, GRPO update</small></a>
+        <a href="#speculative"><b>Speculative decoding</b><small>a cheap draft proposes k tokens, the model verifies them in one forward pass, exact same distribution</small></a>
+        <a href="#moe"><b>Mixture of experts</b><small>a router sends each token to one of four MLPs; watch experts specialise by domain and the balance loss fight collapse</small></a>
       </div>
       <div class="grid">
         <div class="card">
@@ -413,6 +418,63 @@ tinystories_tokenized = tokenized(
         </div>
       </div>
     </section>
+
+    <!-- ================================================================ 8 SPECULATIVE DECODING -->
+    <section class="station" id="s-speculative">
+      <div class="eyebrow">Station 8</div>
+      <h2>Speculative decoding: draft cheaply, verify exactly</h2>
+      <p class="lede">Decoding is one token per forward pass, and each pass is bound by reading the weights, not by arithmetic. So let a cheap draft propose k tokens and have the real model score all k in a single pass. Each proposal is accepted with probability min(1, p/q); at the first rejection you sample from the leftover max(0, p − q) and stop. The output has exactly the model's distribution, and you get more than one token per pass whenever the draft is any good.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="controls">
+            <button type="button" class="primary" id="spRun">Generate</button>
+            <button type="button" id="spReset">Reset stats</button>
+            <label>draft <select id="spDraft"><option value="bigram" selected>bigram from the corpus</option><option value="unigram">unigram (bad draft)</option></select></label>
+            <label>k <select id="spK"><option>2</option><option selected>4</option><option>8</option></select></label>
+            <label>tokens <select id="spSteps"><option>60</option><option selected>120</option><option>240</option></select></label>
+          </div>
+          <div><span class="stat">verify passes <b id="spPasses">0</b></span><span class="stat">tokens <b id="spTokens">0</b></span><span class="stat">accept rate α <b id="spAlpha">–</b></span><span class="stat">tokens / pass <b id="spTpp">–</b></span><span class="stat">theory (1−α^(k+1))/(1−α) <b id="spTheory">–</b></span></div>
+          <canvas class="chart" id="spChart"></canvas>
+          <div class="sample" id="spText">(pretrain first, then generate; accepted draft characters are shown in brackets per pass)</div>
+          <p class="note">Green-ish runs of accepted characters come from the draft; the character after a bracket is the model's correction. Switch to the unigram draft and watch α fall and tokens per pass approach 1: speculation only pays when the draft agrees with the model.</p>
+        </div>
+        <div class="card marin">
+          <h3>Why it is exact</h3>
+          <div class="math">accept x ~ q with prob min(1, p(x)/q(x)); else x ~ norm(max(0, p − q))</div>
+          <p>Summing the two branches gives min(p, q) + (1 − Σ min(p, q)) · max(0, p − q)/Σ max(0, p − q) = p, for every token. The draft only changes how many tokens you get per pass, never which distribution they come from. Lab 17 has the proof, the expected-length formula plotted above as "theory", and the 5090 recipe with a real draft model.</p>
+          <p class="note">The tiny model here has 2 layers, so a verify pass is cheap and the wall-clock gain is small; the accept rate and tokens-per-pass numbers are the same quantities that decide the speedup on a 70B model.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ 9 MIXTURE OF EXPERTS -->
+    <section class="station" id="s-moe">
+      <div class="eyebrow">Station 9</div>
+      <h2>Mixture of experts: a router and four small MLPs</h2>
+      <p class="lede">An MoE layer replaces one big MLP with several small ones and a router that sends each token to its top expert. Total parameters grow with the number of experts; the compute per token does not. The catch is balance: without a penalty the router happily sends everything to one expert. This station trains a top-1 MoE head on top of the pretrained model's hidden states, on the stories plus arithmetic mixture, and shows which expert each domain uses.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="controls">
+            <button type="button" class="primary" id="moeRun">Train</button>
+            <button type="button" id="moeReset">Reset</button>
+            <label>experts <select id="moeE"><option>2</option><option selected>4</option><option>8</option></select></label>
+            <label>balance coef <select id="moeCoef"><option>0</option><option selected>0.01</option><option>0.1</option></select></label>
+            <label>steps <select id="moeSteps"><option>150</option><option selected>300</option></select></label>
+          </div>
+          <div><span class="stat">step <b id="moeStep">0</b></span><span class="stat">loss <b id="moeLoss">–</b></span><span class="stat">balance loss <b id="moeBal">–</b></span><span class="stat">max expert share <b id="moeMax">–</b></span></div>
+          <canvas class="chart" id="moeChart"></canvas>
+          <div class="moe-usage" id="moeUsage"></div>
+          <p class="note">Rows are domains (stories, arithmetic); columns are experts; the bar is the fraction of that domain's tokens routed to that expert. With the balance coefficient at 0 you will usually see one column take everything (routing collapse). With 0.01 the columns even out and, often, the two domains prefer different experts.</p>
+        </div>
+        <div class="card marin">
+          <h3>The balance loss</h3>
+          <div class="math">L_bal = E · Σ_e f_e · P_e,   f_e = fraction of tokens routed to e,   P_e = mean router probability for e</div>
+          <p>f is not differentiable (it comes from an argmax), P is. Their product is minimised when both are uniform, and the gradient flows through P, nudging the router away from over-used experts. That is the Switch Transformer loss; Lab 18 covers the z-loss, capacity factors, loss-free bias balancing, shared experts, and the 5090 recipe that trains a real MoE.</p>
+          <p class="note">Active parameters here: one expert MLP per token. Total: all E of them. That ratio is the whole point of MoE at scale.</p>
+        </div>
+      </div>
+    </section>
+
 
   </main>
 </div>
@@ -807,7 +869,7 @@ $("kmStep").onclick = kmStep; $("kmReset").onclick = kmInit; $("kmK").onchange =
 $("kmRun").onclick = () => { if (!km) kmInit(); if (!km) return; let guard = 0; const loop = () => { const moved = kmStep(); if (moved > 0 && guard++ < 30) setTimeout(loop, 220); }; loop(); };
 
 // ---------------------------------------------------------------- navigation + boot
-function show(id) { document.querySelectorAll(".station").forEach((s) => s.classList.toggle("on", s.id === "s-" + id)); document.querySelectorAll(".nav a.st").forEach((a) => a.classList.toggle("on", a.dataset.st === id)); if (id === "cluster") kmDraw(); if (id === "encoder") drawScatter(); if (id === "pretrain") drawAttn(); if (id === "paint" && !paintLogits) paintInit(); }
+function show(id) { document.querySelectorAll(".station").forEach((s) => s.classList.toggle("on", s.id === "s-" + id)); document.querySelectorAll(".nav a.st").forEach((a) => a.classList.toggle("on", a.dataset.st === id)); if (id === "cluster") kmDraw(); if (id === "encoder") drawScatter(); if (id === "pretrain") drawAttn(); if (id === "paint" && !paintLogits) paintInit(); if (id === "moe" && !MOE && P) moeInit(); }
 
 
 // ---------------------------------------------------------------- station 7: paint with code (GRPO with a rendered reward)
@@ -885,9 +947,106 @@ $("paintStep").onclick = () => { if (!paintLogits) paintInit(); paintStepOnce();
 $("paintReset").onclick = paintInit;
 $("paintRun").onclick = () => { if (!paintLogits) paintInit(); if (paintStop) paintStop(); const steps = Number($("paintSteps").value); paintStop = runner(steps, () => paintStepOnce()); };
 
+
+// ---------------------------------------------------------------- station 8: speculative decoding (bigram draft, transformer verify)
+let spStats = { passes: 0, tokens: 0, proposed: 0, accepted: 0, hist: [] }, spStop = null;
+const BIGRAM = (() => { const c = new Float32Array(V * V).fill(0.5); const ids = enc(STORIES); for (let i = 0; i + 1 < ids.length; i++) c[ids[i] * V + ids[i + 1]] += 1; const q = new Float32Array(V * V); for (let a = 0; a < V; a++) { let z = 0; for (let b = 0; b < V; b++) z += c[a * V + b]; for (let b = 0; b < V; b++) q[a * V + b] = c[a * V + b] / z; } return q; })();
+const UNIGRAM = (() => { const c = new Float32Array(V).fill(0.5); for (const id of enc(STORIES)) c[id] += 1; const z = c.reduce((a, b) => a + b, 0); return c.map((x) => x / z); })();
+function draftDist(prev) { return $("spDraft").value === "bigram" ? BIGRAM.subarray(prev * V, prev * V + V) : UNIGRAM; }
+function sampleFrom(p) { let u = rnd(), i = 0; while (i < p.length - 1 && (u -= p[i]) > 0) i++; return i; }
+function spReset() { if (spStop) spStop(); spStats = { passes: 0, tokens: 0, proposed: 0, accepted: 0, hist: [] }; $("spPasses").textContent = "0"; $("spTokens").textContent = "0"; $("spAlpha").textContent = $("spTpp").textContent = $("spTheory").textContent = "–"; $("spText").textContent = "(pretrain first, then generate)"; lineChart($("spChart"), [{ data: [], color: cssVar("--c1") }]); }
+function spGenerate(nTokens) {
+  if (!P) { $("spText").textContent = "pretrain first (station 2), then come back"; return; }
+  const k = Number($("spK").value);
+  let ids = enc("the little "), out = "the little ";
+  const step = () => {
+    const ctx = ids.slice(-Math.max(1, MAXCTX - k - 1));
+    const draft = []; const qs = []; let prev = ctx[ctx.length - 1];
+    for (let i = 0; i < k; i++) { const q = draftDist(prev); const t = sampleFrom(q); draft.push(t); qs.push(q); prev = t; }
+    const probs = tf.tidy(() => { const x = tf.tensor2d([ctx.concat(draft)], [1, ctx.length + k], "int32"); const { logits } = forward(P, x, true); return tf.softmax(logits.slice([0, ctx.length - 1, 0], [1, k + 1, V]), -1).reshape([k + 1, V]).arraySync(); });
+    let accepted = 0, produced = [];
+    for (let i = 0; i < k; i++) {
+      const p = probs[i], q = qs[i], t = draft[i];
+      if (rnd() < Math.min(1, p[t] / Math.max(q[t], 1e-9))) { accepted++; produced.push(t); continue; }
+      const res = p.map((pv, j) => Math.max(0, pv - q[j])); const z = res.reduce((a, b) => a + b, 0);
+      produced.push(z > 0 ? sampleFrom(res.map((v) => v / z)) : sampleFrom(p)); break;
+    }
+    if (accepted === k) produced.push(sampleFrom(probs[k])); // bonus token from the model's own next distribution
+    spStats.passes++; spStats.proposed += k; spStats.accepted += accepted; spStats.tokens += produced.length; spStats.hist.push(produced.length);
+    ids = ids.concat(produced);
+    out += "[" + dec(produced.slice(0, accepted)) + "]" + dec(produced.slice(accepted));
+    const alpha = spStats.accepted / Math.max(1, spStats.proposed);
+    $("spPasses").textContent = String(spStats.passes); $("spTokens").textContent = String(spStats.tokens); $("spAlpha").textContent = alpha.toFixed(2);
+    $("spTpp").textContent = (spStats.tokens / spStats.passes).toFixed(2); $("spTheory").textContent = ((1 - Math.pow(alpha, k + 1)) / (1 - alpha)).toFixed(2);
+    $("spText").textContent = out; lineChart($("spChart"), [{ data: spStats.hist, color: cssVar("--c1") }], { ymin: 0, ymax: k + 1 });
+    return spStats.tokens;
+  };
+  const target = spStats.tokens + nTokens;
+  if (spStop) spStop();
+  spStop = runner(10000, (i) => { if (spStats.tokens >= target) { spStop(); return; } step(); });
+}
+$("spRun").onclick = () => spGenerate(Number($("spSteps").value)); $("spReset").onclick = spReset;
+
+// ---------------------------------------------------------------- station 9: mixture of experts (top-1 MoE head on frozen hidden states)
+let MOE = null, moeOpt = null, moeHist = { l: [], b: [] }, moeStop = null, moeN = 0;
+function moeInit() {
+  if (moeStop) moeStop(); if (!P) ptInit(); if (MOE) for (const v of MOE.all) v.dispose();
+  const E = Number($("moeE").value);
+  const mk = (shape, sc) => tf.variable(tf.randomNormal(shape, 0, sc, "float32", 4242 + shape.length));
+  MOE = { E, router: mk([D, E], 0.05), w1: mk([E, D, 2 * D], 0.1), b1: tf.variable(tf.zeros([E, 1, 2 * D])), w2: mk([E, 2 * D, D], 0.05), b2: tf.variable(tf.zeros([E, 1, D])) };
+  MOE.all = [MOE.router, MOE.w1, MOE.b1, MOE.w2, MOE.b2];
+  moeOpt = tf.train.adam(0.003); moeHist = { l: [], b: [] }; moeN = 0;
+  $("moeStep").textContent = "0"; $("moeLoss").textContent = $("moeBal").textContent = $("moeMax").textContent = "–"; $("moeUsage").innerHTML = "";
+  lineChart($("moeChart"), [{ data: [], color: cssVar("--c1") }]);
+}
+/** h: [N, D] hidden states -> {logits over V, balance loss, usage [E]} */
+function moeForward(h) {
+  const E = MOE.E; const N = h.shape[0];
+  const rl = h.matMul(MOE.router);                          // [N, E]
+  const probs = tf.softmax(rl, -1);
+  const top = tf.oneHot(rl.argMax(-1), E).cast("float32"); // [N, E] hard top-1 mask
+  const gate = probs.mul(top).sum(-1, true);               // [N, 1] renormalised gate (top-1: the chosen prob)
+  const hb = h.expandDims(0).tile([E, 1, 1]);              // [E, N, D]: every expert sees every token; the mask picks (toy-sized, so fine)
+  const y = tf.relu(hb.matMul(MOE.w1).add(MOE.b1)).matMul(MOE.w2).add(MOE.b2); // [E, N, D]
+  const mixed = y.mul(top.transpose().expandDims(-1)).sum(0).mul(gate);         // [N, D]
+  const out = h.add(mixed);
+  const logits = out.matMul(P.tok, false, true);           // tied head, [N, V]
+  const f = top.mean(0), Pm = probs.mean(0);               // usage fraction, mean prob
+  const bal = f.mul(Pm).sum().mul(E);
+  return { logits, bal, usage: f, top };
+}
+function moeStepOnce() {
+  const coef = Number($("moeCoef").value);
+  const winsA = windows(STORIES, 32), winsB = windows(ARITH, 32);
+  const { x: xa, y: ya } = batchFrom(winsA, 8, rnd), { x: xb, y: yb } = batchFrom(winsB, 8, rnd);
+  const x = tf.concat([xa, xb], 0), y = tf.concat([ya, yb], 0);
+  let usageA = null, usageB = null, balV = 0;
+  const loss = moeOpt.minimize(() => tf.tidy(() => {
+    const h = forward(P, x, true).h;                        // frozen base: no grads reach P (only MOE.all are optimised)
+    const N = x.shape[0] * x.shape[1];
+    const { logits, bal, top } = moeForward(h.reshape([N, D]));
+    const ce = tf.losses.softmaxCrossEntropy(tf.oneHot(y.reshape([N]), V), logits);
+    const tA = top.slice([0, 0], [N / 2, MOE.E]).mean(0), tB = top.slice([N / 2, 0], [N / 2, MOE.E]).mean(0);
+    usageA = tA.dataSync(); usageB = tB.dataSync(); balV = bal.dataSync()[0];
+    return ce.add(bal.mul(coef));
+  }), true, MOE.all);
+  const lv = loss.dataSync()[0]; loss.dispose(); xa.dispose(); ya.dispose(); xb.dispose(); yb.dispose(); x.dispose(); y.dispose();
+  moeN++; moeHist.l.push(lv); moeHist.b.push(balV);
+  const mx = Math.max(...Array.from(usageA).map((a, i) => (a + usageB[i]) / 2));
+  $("moeStep").textContent = String(moeN); $("moeLoss").textContent = lv.toFixed(3); $("moeBal").textContent = balV.toFixed(3); $("moeMax").textContent = mx.toFixed(2);
+  if (moeN % 5 === 0 || moeN === 1) {
+    lineChart($("moeChart"), [{ data: moeHist.l, color: cssVar("--c1") }, { data: moeHist.b, color: cssVar("--c2") }], { ymin: 0 });
+    const row = (name, u) => `<span>${name}</span><div class="bars">${Array.from(u).map((v, e) => `<span title="expert ${e}: ${(100 * v).toFixed(0)}%"><i style="height:${Math.round(100 * v)}%"></i><b>${(100 * v).toFixed(0)}%</b></span>`).join("")}</div>`;
+    $("moeUsage").innerHTML = row("stories", usageA) + row("arith", usageB);
+  }
+  return lv;
+}
+$("moeRun").onclick = () => { if (!MOE) moeInit(); if (moeStop) moeStop(); moeStop = runner(Number($("moeSteps").value), () => moeStepOnce()); };
+$("moeReset").onclick = moeInit; $("moeE").onchange = moeInit;
+
 // ---------------------------------------------------------------- control surface (Cortex embeds this page and its agent tools drive it)
-const STATION_RUN = { pretrain: "ptRun", midtrain: "mtRun", sft: "sftRun", dpo: "dpoRun", encoder: "encMlm", contrastive: "encCon", cluster: "kmRun", paint: "paintRun" };
-const STATION_STEPS = { pretrain: "ptSteps", midtrain: "mtSteps", sft: "sftSteps", dpo: "dpoSteps", encoder: "encSteps", contrastive: "encSteps", paint: "paintSteps" };
+const STATION_RUN = { pretrain: "ptRun", midtrain: "mtRun", sft: "sftRun", dpo: "dpoRun", encoder: "encMlm", contrastive: "encCon", cluster: "kmRun", paint: "paintRun", speculative: "spRun", moe: "moeRun" };
+const STATION_STEPS = { pretrain: "ptSteps", midtrain: "mtSteps", sft: "sftSteps", dpo: "dpoSteps", encoder: "encSteps", contrastive: "encSteps", paint: "paintSteps", speculative: "spSteps", moe: "moeSteps" };
 function labStatus() {
   const txt = (id) => { const el = document.getElementById(id); return el ? el.textContent : null; };
   return {
@@ -898,6 +1057,8 @@ function labStatus() {
     dpo: { step: dpoHist.l.length, loss: dpoHist.l.at(-1) ?? null, margin: dpoHist.m.at(-1) ?? null, sample: txt("dpoSample") },
     encoder: { purity: txt("encPurity"), nn: txt("encNN") },
     cluster: { inertia: txt("kmInertia"), purity: txt("kmPurity") },
+    speculative: { passes: spStats.passes, tokens: spStats.tokens, accept_rate: spStats.proposed ? spStats.accepted / spStats.proposed : null, tokens_per_pass: spStats.passes ? spStats.tokens / spStats.passes : null, text: txt("spText") },
+    moe: { step: moeN, loss: moeHist.l.at(-1) ?? null, balance_loss: moeHist.b.at(-1) ?? null, max_expert_share: txt("moeMax") },
     paint: { step: paintN, reward_mean: paintHist.at(-1) ?? null, best: paintBestR > 0 ? paintBestR : null, blank_rate: txt("paintBlank"), kl: txt("paintKL"), best_program: paintBestProg },
     errors: window.__labErrors,
   };
@@ -910,7 +1071,7 @@ function labRun(station, steps) {
     if (stepsEl.tagName === "SELECT" && ![...stepsEl.options].some((o) => o.value === String(steps))) { const o = document.createElement("option"); o.value = o.textContent = String(steps); stepsEl.appendChild(o); }
     stepsEl.value = String(steps);
   }
-  const target = { pretrain: "pretrain", midtrain: "midtrain", sft: "posttrain", dpo: "posttrain", encoder: "encoder", contrastive: "encoder", cluster: "cluster", paint: "paint" }[station];
+  const target = { pretrain: "pretrain", midtrain: "midtrain", sft: "posttrain", dpo: "posttrain", encoder: "encoder", contrastive: "encoder", cluster: "cluster", paint: "paint", speculative: "speculative", moe: "moe" }[station];
   if (location.hash.slice(1) !== target) { location.hash = target; }
   if (station === "dpo") document.querySelector('[data-pt="dpo"]')?.click();
   if (station === "sft") document.querySelector('[data-pt="sft"]')?.click();

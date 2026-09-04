@@ -181,7 +181,7 @@ export const webmcpTools: ModelContextTool[] = [
   // ---- the Training Lab: the agent gets the same buttons the person has (train in the browser, run on a GPU)
   {
     name: "open_lab",
-    description: "Open the Training Lab and show a station: overview|data|pretrain|midtrain|posttrain|encoder|cluster|paint. The lab trains a tiny transformer in the browser so the user can watch each stage of an LLM pipeline.",
+    description: "Open the Training Lab and show a station: overview|data|pretrain|midtrain|posttrain|encoder|cluster|paint|speculative|moe. The lab trains a tiny transformer in the browser so the user can watch each stage of an LLM pipeline.",
     inputSchema: { type: "object", properties: { station: { type: "string" } } },
     execute: async (i) => {
       const st = s(i.station || "overview", 20);
@@ -192,7 +192,7 @@ export const webmcpTools: ModelContextTool[] = [
   },
   {
     name: "lab_train",
-    description: "Train in the user's browser at a lab station and watch it live: station pretrain|midtrain|sft|dpo|encoder|contrastive|cluster|paint, steps (default the station's setting). Returns immediately; call lab_status to read the loss, samples, and metrics as it runs.",
+    description: "Train in the user's browser at a lab station and watch it live: station pretrain|midtrain|sft|dpo|encoder|contrastive|cluster|paint|speculative|moe (speculative and moe need pretrain first), steps (default the station's setting). Returns immediately; call lab_status to read the loss, samples, and metrics as it runs.",
     inputSchema: { type: "object", properties: { station: { type: "string" }, steps: { type: "integer" } }, required: ["station"] },
     execute: async (i) => {
       const st = s(i.station, 20);

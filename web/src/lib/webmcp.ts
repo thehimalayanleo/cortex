@@ -119,13 +119,14 @@ export const webmcpTools: ModelContextTool[] = [
   },
   {
     name: "key_passages",
-    description: "The most important passages of a paper, quoted verbatim with page numbers: theorems, main results, the central claim, the method, the stated limitation. Cached per paper; refresh: true re-extracts.",
-    inputSchema: { type: "object", properties: { id: { type: "string" }, refresh: { type: "boolean" } }, required: ["id"] },
+    description: "The most important passages of a paper, quoted verbatim with page numbers: theorems, main results, the central claim, the method, the stated limitation. Cached per paper; refresh: true re-extracts. pages: an optional range such as '1-5' to read only part of a long paper or book (omit for the whole paper; very long papers automatically use the first 12 and last 3 pages).",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, refresh: { type: "boolean" }, pages: { type: "string" } }, required: ["id"] },
     annotations: { readOnlyHint: true },
     execute: async (i) => {
       const pid = s(i.id, 200);
-      let h = i.refresh ? null : await api.library.highlights(pid);
-      if (!h || !h.items) h = await api.library.makeHighlights(pid, !!i.refresh);
+      const pages = i.pages ? s(i.pages, 20) : undefined;
+      let h = i.refresh || pages ? null : await api.library.highlights(pid);
+      if (!h || !h.items) h = await api.library.makeHighlights(pid, !!i.refresh, pages);
       record("key_passages", i, true, `${pid} · ${h.items?.length ?? 0} passages`);
       return text(h.items ?? []);
     },

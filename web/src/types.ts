@@ -165,4 +165,6 @@ export interface Highlights {
   model?: string;
   generated?: string;
   items: Highlight[] | null;
+  scope?: string; // "whole paper", "pages 1-5", or the auto head-and-tail scope for long papers
+  pages_total?: number;
 }

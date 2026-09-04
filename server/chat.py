@@ -103,7 +103,7 @@ TOOLS = [
     {"type": "function", "function": {"name": "update_project", "description": "Update a project's verdict, next_action, or status.",
         "parameters": {"type": "object", "properties": {"slug": {"type": "string"}, "verdict": {"type": "string"}, "next_action": {"type": "string"}, "status": {"type": "string"}}, "required": ["slug"]}}},
     {"type": "function", "function": {"name": "key_passages", "description": "The most important passages of a paper: theorems, main results, central claim, method, limitation. Verbatim quotes with page numbers, cached per paper. Use when asked what a paper proves or shows, or to highlight it.",
-        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "refresh": {"type": "boolean"}}, "required": ["id"]}}},
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}, "refresh": {"type": "boolean"}, "pages": {"type": "string", "description": "Optional page range to read, e.g. '1-5' for the first five pages of a long paper or book; omit for the whole paper (very long papers automatically use the first 12 and last 3 pages)."}}, "required": ["id"]}}},
     {"type": "function", "function": {"name": "run_agent", "description": "Hand a longer task to a coding agent (codex, opencode, or claude) that runs inside the vault with file tools. Use for multi-file edits, literature sweeps, or anything that needs a shell. Returns its output (bounded).",
         "parameters": {"type": "object", "properties": {"agent": {"type": "string", "enum": ["codex", "opencode", "claude"]}, "task": {"type": "string"}}, "required": ["agent", "task"]}}},
 ]
@@ -112,7 +112,22 @@ TOOLS = [
 HIGHLIGHT_KINDS = ("theorem", "result", "claim", "method", "limitation")
 
 
-def extract_highlights(pid: str, model: str | None = None, force: bool = False) -> dict:
+def _page_range(spec: str | None, n: int) -> tuple[int, int] | None:
+    """'1-5' -> (1, 5); '5' -> (1, 5); 'first 5' works too. None or 'all' -> None. Clamped to the paper."""
+    import re
+    if not spec or str(spec).strip().lower() in ("all", "whole", "full"):
+        return None
+    m = re.findall(r"\d+", str(spec))
+    if not m:
+        return None
+    a, b = (1, int(m[0])) if len(m) == 1 else (int(m[0]), int(m[1]))
+    a, b = max(1, min(a, n)), max(1, min(b, n))
+    if a > b:
+        a, b = b, a
+    return (a, b)
+
+
+def extract_highlights(pid: str, model: str | None = None, force: bool = False, pages: str | None = None) -> dict:
     """Pull the theorems, main results, and key claims out of a paper as verbatim passages with page numbers.
 
     Cached in library/<id>/highlights.json. Each passage is checked against the extracted text, so the model
@@ -122,15 +137,26 @@ def extract_highlights(pid: str, model: str | None = None, force: bool = False) 
     p = vault.get_paper(pid)
     if not p:
         raise ValueError(f"no paper {pid}")
-    cached = vault.read_highlights(pid)
-    if cached and not force:
-        return cached
-    full = vault.paper_text(pid, max_chars=200000)
+    full = vault.paper_text(pid, max_chars=4000000)  # whole text: page numbers must be real even for books
     if not full.strip():
         raise ValueError("no extracted text for this paper yet")
-    pages = full.split("\f")
+    all_pages = full.split("\f")
+    rng = _page_range(pages, len(all_pages))
+    # Long papers: unless a range was asked for, read the first 12 pages plus the last 3 (results and limitations sit late).
+    auto = rng is None and len(all_pages) > 30
+    scope = f"pages {rng[0]}-{rng[1]}" if rng else (f"pages 1-12 and {len(all_pages) - 2}-{len(all_pages)} (auto, {len(all_pages)} pages)" if auto else "whole paper")
+    cached = vault.read_highlights(pid)
+    if cached and not force and (cached.get("scope") or "whole paper") == scope:
+        return cached
+    if rng:
+        scoped = "\f".join(all_pages[rng[0] - 1 : rng[1]])
+    elif auto:
+        scoped = "\f".join(all_pages[:12]) + "\f" + "\f".join(all_pages[-3:])
+    else:
+        scoped = full
+    pages_text = all_pages  # page numbers are checked against the whole paper, so a quote from the tail still gets its real page
     # keep the model's input bounded: first ~45k chars plus the tail (results/conclusion often sit late)
-    body = full if len(full) <= 60000 else full[:45000] + "\n\n[... middle omitted ...]\n\n" + full[-15000:]
+    body = scoped if len(scoped) <= 60000 else scoped[:45000] + "\n\n[... middle omitted ...]\n\n" + scoped[-15000:]
     prompt = (
         "You are reading a research paper. Extract the 6 to 12 most important passages: theorems, lemmas, main results with their numbers, "
         "the central claim, the key method statement, and the main stated limitation. Quote each passage VERBATIM from the text "
@@ -149,7 +175,7 @@ def extract_highlights(pid: str, model: str | None = None, force: bool = False) 
     def norm(s: str) -> str:
         return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
-    npages = [norm(pg) for pg in pages]
+    npages = [norm(pg) for pg in pages_text]
     out = []
     for it in items if isinstance(items, list) else []:
         q = str(it.get("quote", "")).strip()
@@ -164,14 +190,14 @@ def extract_highlights(pid: str, model: str | None = None, force: bool = False) 
             continue  # not in the paper: drop it rather than show an invented quote
         kind = str(it.get("kind", "claim")).lower()
         out.append({"kind": kind if kind in HIGHLIGHT_KINDS else "claim", "quote": q[:600], "why": str(it.get("why", ""))[:300], "page": page})
-    result = {"id": pid, "model": model or DEFAULT_MODEL, "generated": time.strftime("%Y-%m-%dT%H:%M:%S"), "items": out[:12]}
+    result = {"id": pid, "model": model or DEFAULT_MODEL, "generated": time.strftime("%Y-%m-%dT%H:%M:%S"), "items": out[:12], "scope": scope, "pages_total": len(all_pages)}
     vault.write_highlights(pid, result)
     return result
 
 
 def _exec(name: str, a: dict) -> tuple[object, str, str]:
     if name == "key_passages":
-        r = extract_highlights(str(a["id"]), force=bool(a.get("refresh")))
+        r = extract_highlights(str(a["id"]), force=bool(a.get("refresh")) or bool(a.get("pages")), pages=a.get("pages"))
         return r["items"], f"{len(r['items'])} passages · {str(a['id'])[:30]}", f"cortex://paper/{a['id']}"
     """Run a tool. Returns (result_for_model, summary_for_ledger, link)."""
     if name == "search_vault":

@@ -265,6 +265,7 @@ def paper_put(pid: str, p: PaperPatch):
 class HighlightsIn(BaseModel):
     model: str | None = None
     refresh: bool = False
+    pages: str | None = None  # e.g. "1-5" or "first 5"; None = whole paper (long papers auto-scope to the head and tail)
 
 
 @app.get("/api/library/{pid}/highlights")
@@ -276,7 +277,7 @@ def paper_highlights(pid: str):
 @app.post("/api/library/{pid}/highlights")
 def paper_highlights_make(pid: str, h: HighlightsIn):
     try:
-        return chat.extract_highlights(pid, h.model, force=h.refresh)
+        return chat.extract_highlights(pid, h.model, force=h.refresh or bool(h.pages), pages=h.pages)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:

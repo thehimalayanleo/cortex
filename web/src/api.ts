@@ -181,8 +181,8 @@ export const api = {
       }),
     pdfUrl: (id: string) => `${BASE}/library/${encodeURIComponent(id)}/pdf`,
     highlights: (id: string) => request<Highlights>(`/library/${encodeURIComponent(id)}/highlights`),
-    makeHighlights: (id: string, refresh = false) =>
-      request<Highlights>(`/library/${encodeURIComponent(id)}/highlights`, { method: "POST", body: JSON.stringify({ refresh }) }),
+    makeHighlights: (id: string, refresh = false, pages?: string) =>
+      request<Highlights>(`/library/${encodeURIComponent(id)}/highlights`, { method: "POST", body: JSON.stringify({ refresh, pages: pages || null }) }),
     ingest: (src: { path: string } | { arxiv: string } | { url: string }) =>
       request<PaperMeta>("/library/ingest", { method: "POST", body: JSON.stringify(src) }),
     upload: (file: File) => {

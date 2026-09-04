@@ -44,9 +44,11 @@ def build_parser():
     p = C.base_parser("embed_contrastive", __doc__.split("\n")[0])
     p.add_argument("--pairs-jsonl", default=None, help='rows of {"query": ..., "positive": ...}')
     p.add_argument("--heldout-frac", type=float, default=0.2)
+    p.add_argument("--heldout-views", type=int, default=8, help="smoke: word-dropped views per held-out sentence")
     p.add_argument("--batch", type=int, default=None)
     p.add_argument("--lr", type=float, default=None)
-    p.add_argument("--tau", type=float, default=0.05, help="temperature (smoke)")
+    p.add_argument("--tau", type=float, default=0.1, help="temperature (smoke)")
+    p.add_argument("--fixed-queries", action="store_true", help="smoke: train on the fixed queries instead of re-dropping words each step")
     p.add_argument("--model", default="nomic-ai/nomic-embed-text-v1.5")
     p.add_argument("--matryoshka", default=None, help="comma-separated dims, e.g. 768,512,256,128,64")
     p.add_argument("--max-len", type=int, default=512)
@@ -57,16 +59,17 @@ def build_parser():
 # --------------------------------------------------------------------------- smoke
 
 
+def drop_words(s: str, rng: random.Random, p_drop: float = 0.35) -> str:
+    words = s.split()
+    keep = [w for w in words if rng.random() > p_drop] or words[:2]
+    return " ".join(keep)
+
+
 def synthetic_pairs(seed: int) -> list[dict]:
     """query = the sentence with about a third of its words removed; positive = the full sentence."""
     rng = random.Random(seed)
     sentences = [s for v in C.TOPICS.values() for s in v] + C.story_sentences()
-    pairs = []
-    for s in sentences:
-        words = s.split()
-        keep = [w for w in words if rng.random() > 0.35] or words[:2]
-        pairs.append({"query": " ".join(keep), "positive": s})
-    return pairs
+    return [{"query": drop_words(s, rng), "positive": s} for s in sentences]
 
 
 class Encoder(torch.nn.Module):
@@ -113,12 +116,16 @@ def smoke(args):
     rng.shuffle(pairs)
     n_held = max(4, int(args.heldout_frac * len(pairs)))
     held, train = pairs[:n_held], pairs[n_held:]
+    if not args.pairs_jsonl:
+        # several word-dropped views of every held-out sentence: same held-out split, less noisy recall@1
+        vr = random.Random(args.seed + 1)
+        held = [{"query": drop_words(p["positive"], vr), "positive": p["positive"]} for p in held for _ in range(args.heldout_views)]
     corpus = sorted({p["positive"] for p in pairs})
     seq_len = 96
     chars = sorted(set("".join(p["query"] + p["positive"] for p in pairs)))
     tok = C.CharTokenizer(chars)
     enc = Encoder(tok.vocab_size, seq_len).to(device)
-    C.log(f"{len(train)} train pairs, {len(held)} held-out, corpus of {len(corpus)} documents; chance recall@1 = {1 / len(corpus):.3f}")
+    C.log(f"{len(train)} train pairs, {len(held)} held-out queries, corpus of {len(corpus)} documents; chance recall@1 = {1 / len(corpus):.3f}")
     r0 = recall_at_1(enc, tok, held, corpus, device, seq_len)
     C.metric(0, recall_at_1=r0)
     opt = C.make_adamw(enc, args.lr, 0.01)
@@ -128,7 +135,10 @@ def smoke(args):
         for g in opt.param_groups:
             g["lr"] = lr
         batch = rng.sample(train, min(args.batch, len(train)))
-        q = encode_texts(enc, tok, [b["query"] for b in batch], device, seq_len)
+        # fresh augmentation each step (unless --fixed-queries): a new random word-dropped view of each positive,
+        # so the encoder cannot memorize a few dozen strings and has to learn which words identify a sentence
+        queries = [b["query"] if (args.fixed_queries or args.pairs_jsonl) else drop_words(b["positive"], rng) for b in batch]
+        q = encode_texts(enc, tok, queries, device, seq_len)
         p = encode_texts(enc, tok, [b["positive"] for b in batch], device, seq_len)
         loss, acc = info_nce(q, p, args.tau)
         opt.zero_grad(set_to_none=True)
@@ -201,7 +211,7 @@ def real(args):
 
 def main():
     args = build_parser().parse_args()
-    d = dict(steps=200, batch=32, lr=2e-3) if args.smoke else dict(steps=None, batch=32, lr=2e-5)
+    d = dict(steps=200, batch=32, lr=1e-3) if args.smoke else dict(steps=None, batch=32, lr=2e-5)
     for k, v in d.items():
         if getattr(args, k) is None:
             setattr(args, k, v)

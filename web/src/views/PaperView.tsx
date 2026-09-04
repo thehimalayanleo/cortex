@@ -54,12 +54,13 @@ function PaperPage({ detail, projects }: { detail: PaperDetail; projects: Projec
   const [hlBusy, setHlBusy] = useState(false);
   const [hlError, setHlError] = useState<string | null>(null);
   const [pdfPage, setPdfPage] = useState<number | null>(null);
-  const loadHighlights = async (refresh = false) => {
+  const [hlScope, setHlScope] = useState<string>("");
+  const loadHighlights = async (refresh = false, pages?: string) => {
     setHlBusy(true);
     setHlError(null);
     try {
-      let h = refresh ? null : await api.library.highlights(id);
-      if (!h || !h.items) h = await api.library.makeHighlights(id, refresh);
+      let h = refresh || pages ? null : await api.library.highlights(id);
+      if (!h || !h.items) h = await api.library.makeHighlights(id, refresh, pages);
       setHl(h);
     } catch (e) {
       setHlError(errorMessage(e));
@@ -209,9 +210,27 @@ function PaperPage({ detail, projects }: { detail: PaperDetail; projects: Projec
       {hlOn ? (
         <div className="highlights" aria-label="Key passages">
           <div className="hl-head">
-            <span>{hl?.items ? `${hl.items.length} passages` : hlBusy ? "Reading the paper…" : "Key passages"}</span>
+            <span>{hl?.items ? `${hl.items.length} passages${hl.scope && hl.scope !== "whole paper" ? ` · ${hl.scope}` : ""}` : hlBusy ? "Reading the paper…" : "Key passages"}</span>
             <span className="grow" />
-            <button type="button" className="btn ghost sm" disabled={hlBusy} onClick={() => void loadHighlights(true)} title="Extract again">
+            <select
+              className="select sm"
+              value={hlScope}
+              aria-label="Which pages to read"
+              title="Long papers and books: read only part of the text"
+              disabled={hlBusy}
+              onChange={(e) => {
+                const v = e.target.value;
+                setHlScope(v);
+                void loadHighlights(true, v || undefined);
+              }}
+            >
+              <option value="">{hl?.pages_total && hl.pages_total > 30 ? `whole paper (auto: head and tail of ${hl.pages_total} pages)` : "whole paper"}</option>
+              <option value="1-5">first 5 pages</option>
+              <option value="1-10">first 10 pages</option>
+              <option value="1-20">first 20 pages</option>
+              {hl?.pages_total && hl.pages_total > 40 ? <option value={`${hl.pages_total - 9}-${hl.pages_total}`}>last 10 pages</option> : null}
+            </select>
+            <button type="button" className="btn ghost sm" disabled={hlBusy} onClick={() => void loadHighlights(true, hlScope || undefined)} title="Extract again">
               {hlBusy ? "Working…" : "Refresh"}
             </button>
           </div>

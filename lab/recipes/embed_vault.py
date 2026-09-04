@@ -84,8 +84,11 @@ def chunk_text(text: str, chunk_chars: int, max_chunks: int) -> list[str]:
             if cur:
                 chunks.append(cur)
                 cur = ""
-            for i in range(0, len(para), chunk_chars):
-                chunks.append(para[i: i + chunk_chars])
+            pieces = [para[i: i + chunk_chars] for i in range(0, len(para), chunk_chars)]
+            if len(pieces) > 1 and len(pieces[-1]) < chunk_chars // 5:   # fold a short remainder into the previous piece
+                tail = pieces.pop()
+                pieces[-1] += tail
+            chunks.extend(pieces)
             continue
         if len(cur) + len(para) + 2 > chunk_chars and cur:
             chunks.append(cur)
@@ -94,6 +97,10 @@ def chunk_text(text: str, chunk_chars: int, max_chunks: int) -> list[str]:
             cur = (cur + "\n\n" + para) if cur else para
     if cur:
         chunks.append(cur)
+    # a short trailing fragment (a stray sentence, a page number) is folded into its predecessor
+    if len(chunks) > 1 and len(chunks[-1]) < chunk_chars // 5:
+        chunks[-2] = chunks[-2] + "\n\n" + chunks[-1]
+        chunks.pop()
     return chunks[:max_chunks]
 
 

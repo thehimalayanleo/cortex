@@ -21,7 +21,7 @@ The agent works on the same page the person is looking at. Tools that change som
 | `open_lab` | open the Training Lab at a station (data, pretrain, midtrain, posttrain, encoder, cluster, paint) |
 | `lab_train` | train the in-browser model at a station for N steps; the person watches the loss curve move |
 | `lab_status` | read the live state of the browser lab: step, loss, samples, purity, reward |
-| `list_lab_chapters` | the sixteen teaching chapters, each a note the agent can open and quote |
+| `list_lab_chapters` | the eighteen teaching chapters, each a note the agent can open and quote |
 | `list_runs` | training runs launched on a GPU (this machine, the user's box over SSH, or Modal) |
 | `start_run` | launch a recipe on a GPU and open it so the person sees the metrics stream in |
 | `read_run` | status, parsed metrics, result, and log tail of a run |

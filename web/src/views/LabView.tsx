@@ -458,6 +458,7 @@ function MetricChart({ name, rows }: { name: string; rows: Record<string, number
 
 /** The GPU box: the app checks it and, if PyTorch is missing, installs everything over SSH itself. */
 export function GpuPanel({ onReady }: { onReady?: () => void }) {
+  const { toast } = useToast();
   const [st, setSt] = useState<GpuStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [log, setLog] = useState<string[] | null>(null);

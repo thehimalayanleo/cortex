@@ -55,7 +55,7 @@ def executors() -> dict[str, Any]:
     local_ok = bool(shutil.which("uv")) or bool(os.environ.get("CORTEX_LOCAL_PYTHON"))
     return {
         "local": {"available": local_ok, "note": "runs the recipe on this machine (CPU unless it has a GPU); use --smoke for a quick pass"},
-        "ssh": {"available": bool(ssh_host), "host": ssh_host or None, "note": "your GPU box over SSH (the default is the home 5090 over Tailscale); recipes are synced to ~/cortex-lab there"},
+        "ssh": {"available": bool(ssh_host), "host": ssh_host or None, "note": "a GPU box over SSH: your own (Tailscale) or any rented node; set CORTEX_SSH_HOST=user@host, CORTEX_SSH_KEY (private key), CORTEX_SSH_PORT, CORTEX_SSH_PYTHON"},
         "modal": {"available": modal_ok, "note": "a rented GPU through Modal; needs `modal token set` once"},
         "demo": os.environ.get("CORTEX_DEMO") == "1",
     }
@@ -118,7 +118,7 @@ def _command(executor: str, recipe: str, args: str, script: Path | None = None, 
 
 def _sync_recipes(host: str) -> str:
     """rsync the recipes folder to the GPU box; returns rsync's output (empty on success)."""
-    cmd = ["rsync", "-az", "--delete", "--rsync-path", "mkdir -p ~/cortex-lab/recipes ~/cortex-lab/out && rsync", "-e", "ssh " + " ".join(SSH_OPTS),
+    cmd = ["rsync", "-az", "--delete", "--rsync-path", "mkdir -p ~/cortex-lab/recipes ~/cortex-lab/out && rsync", "-e", "ssh " + " ".join(shlex.quote(o) for o in _ssh_opts()),
            str(RECIPES) + "/", f"{host}:~/cortex-lab/recipes/"]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
@@ -129,7 +129,32 @@ def _sync_recipes(host: str) -> str:
 
 # ---------------------------------------------------------------- the GPU box: status and one-click bootstrap (the app makes the connection, not the user)
 
-SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=12", "-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/cm-%r@%h:%p", "-o", "ControlPersist=600"]
+def _ssh_opts() -> list[str]:
+    """SSH options. On a hosted deploy there is no ~/.ssh, so CORTEX_SSH_KEY (private key text) and CORTEX_SSH_PORT
+    let the demo reach any rented GPU node (a cloud box, a givemeanode/RunPod/Lambda instance) with plain key auth."""
+    opts = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=12", "-o", "ControlMaster=auto", "-o", "ControlPath=/tmp/cortex-cm-%r@%h:%p", "-o", "ControlPersist=600"]
+    key = os.environ.get("CORTEX_SSH_KEY")
+    if key:
+        kp = Path(os.environ.get("CORTEX_STATE", "/tmp")) / "cortex_ssh_key"
+        if not kp.exists() or kp.read_text() != key.strip() + "\n":
+            kp.write_text(key.strip() + "\n")
+            kp.chmod(0o600)
+        opts += ["-i", str(kp), "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=/tmp/cortex_known_hosts"]
+    port = os.environ.get("CORTEX_SSH_PORT")
+    if port:
+        opts += ["-p", port]
+    return opts
+
+
+class _SshOpts(list):
+    """Evaluated lazily so env changes and the key file are picked up per call."""
+    def __iter__(self):
+        return iter(_ssh_opts())
+    def __len__(self):
+        return len(_ssh_opts())
+
+
+SSH_OPTS = _SshOpts()
 SETUP_SCRIPT = r"""
 set -e
 export PATH="$HOME/.local/bin:$PATH"
@@ -290,7 +315,8 @@ def _run(d: Path, meta: dict) -> None:
             if script:
                 host = os.environ["CORTEX_SSH_HOST"]
                 subprocess.run(["ssh", *SSH_OPTS, host, "mkdir -p ~/cortex-lab/scratch"], check=True, timeout=60)
-                subprocess.run(["scp", "-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/cm-%r@%h:%p", str(script), f"{host}:~/cortex-lab/scratch/{script.name}"], check=True, timeout=60)
+                scp_opts = [("-P" if o == "-p" else o) for o in _ssh_opts()]
+                subprocess.run(["scp", *scp_opts, str(script), f"{host}:~/cortex-lab/scratch/{script.name}"], check=True, timeout=60)
         cmd = _command(meta["executor"], meta["recipe"], meta["args"], script, meta.get("cmd"))
         log.write("[cortex] $ " + " ".join(shlex.quote(c) for c in cmd) + "\n")
         env = dict(os.environ, PYTHONUNBUFFERED="1")

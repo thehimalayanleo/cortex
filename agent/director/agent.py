@@ -29,7 +29,34 @@ except Exception:  # pragma: no cover
     StreamableHTTPConnectionParams = None  # type: ignore
 
 CORTEX = os.environ.get("CORTEX_URL", "http://127.0.0.1:8788").rstrip("/")
-MODEL = os.environ.get("DIRECTOR_MODEL", "gemini-2.5-flash")
+
+
+def _pick_model():
+    """Gemini when Google credentials exist (the hackathon configuration). Otherwise, for development without any
+    Google key, the same agent runs on Cortex's own OpenAI-compatible provider (OpenCode Go) through LiteLLM."""
+    if os.environ.get("DIRECTOR_MODEL"):
+        return os.environ["DIRECTOR_MODEL"]
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"):
+        return "gemini-2.5-flash"
+    try:
+        from google.adk.models.lite_llm import LiteLlm
+    except Exception:
+        return "gemini-2.5-flash"
+    key = os.environ.get("OPENCODE_API_KEY")
+    if not key:
+        try:
+            auth = json.loads((os.path.expanduser("~/.local/share/opencode/auth.json") and open(os.path.expanduser("~/.local/share/opencode/auth.json")).read()))
+            key = auth.get("opencode-go", {}).get("key")
+        except Exception:
+            key = None
+    if not key:
+        return "gemini-2.5-flash"
+    os.environ.setdefault("OPENAI_API_KEY", key)
+    os.environ.setdefault("OPENAI_API_BASE", os.environ.get("CORTEX_BASE_URL", "https://opencode.ai/zen/go/v1"))
+    return LiteLlm(model="openai/" + os.environ.get("CORTEX_MODEL", "glm-5.3"), extra_headers={"User-Agent": "cortex-director/0.1"})
+
+
+MODEL = _pick_model()
 
 
 def _call(method: str, path: str, body: dict[str, Any] | None = None) -> Any:

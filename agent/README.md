@@ -16,6 +16,13 @@ adk web                                   # open the URL it prints, pick "direct
 
 Try: "Read the board, plan four shots for 'a kaiju of black coral rises from a storm and hesitates', render the first with the smoke brick, and tell me the verdict."
 
+## Without a Google key (development)
+
+Unset `GOOGLE_API_KEY` and the director runs on Cortex's own provider (OpenCode Go, glm-5.3) through LiteLLM:
+`pip install google-adk litellm`, then `adk web` as above. Every tool works the same; only the model behind the
+planning changes. For the hackathon submission the model must be Gemini: set the key (free at aistudio.google.com,
+no card) or the Vertex variables, and the agent picks Gemini automatically.
+
 ## Deploy
 
 Vertex AI Agent Engine: `adk deploy agent_engine --project <id> --region us-central1 --staging_bucket gs://<bucket> director`.

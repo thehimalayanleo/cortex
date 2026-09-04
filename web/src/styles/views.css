@@ -693,6 +693,31 @@
 .take{font:11.5px var(--mono);border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--muted);padding:2px 7px;cursor:pointer}
 .take.keep{border-color:#3fa46a;color:#3fa46a}.take.reshoot{border-color:#c9962b;color:#c9962b}.take.running,.take.queued{border-color:var(--accent);color:var(--accent)}.take.failed{border-color:#d0453f;color:#d0453f}
 
+/* characters and scenes: the same bordered cards as shots */
+.studio-section{display:flex;flex-direction:column;gap:8px}
+.section-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.section-head h3{margin:0;font:600 14px var(--sans);color:var(--ink);text-transform:uppercase;letter-spacing:.04em}
+.section-head .grow{flex:1}
+.char-grid,.scene-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:12px}
+.char-new{display:grid;grid-template-columns:minmax(140px,1fr) minmax(280px,3fr) minmax(140px,1fr) auto;gap:8px;align-items:start;border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--panel)}
+.char-new input,.char-new textarea,.scene-plan input{box-sizing:border-box;width:100%;font:13px/1.4 var(--sans);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.char-new textarea{resize:vertical}
+.char-paths{display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:11px;overflow:hidden}
+.char-paths span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shot.char.st-building{border-left-color:var(--accent)}.shot.char.st-hero{border-left-color:#6b8cc7}.shot.char.st-heroset{border-left-color:#3fa46a}.shot.char.st-lora{border-left-color:#3fa46a;box-shadow:0 0 0 1px #3fa46a inset}.shot.char.st-failed{border-left-color:#d0453f}
+.pill.st-building{color:var(--accent);border-color:var(--accent)}.pill.st-hero{color:#6b8cc7;border-color:#6b8cc7}.pill.st-heroset,.pill.st-lora,.pill.st-assembled{color:#3fa46a;border-color:#3fa46a}.pill.st-failed{color:#d0453f;border-color:#d0453f}
+.pill.kind-filler{color:#c9962b;border-color:#c9962b}.pill.kind-full{color:#8b5cf6;border-color:#8b5cf6}
+.scene-plan{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.scene-plan input{flex:1;min-width:260px;width:auto}
+.shot.scene.st-assembled{border-left-color:#3fa46a;box-shadow:0 0 0 1px #3fa46a inset}
+.shot.scene .shot-title{cursor:default}
+.scene-meta{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11px}
+.scene-shots{display:flex;gap:4px;flex-wrap:wrap}
+.scene-shots .take{cursor:default}
+.scene-dialogue{display:flex;flex-direction:column;gap:2px;color:var(--muted)}
+.shot.scene img.contact,.shot.scene video{width:100%;border-radius:8px;border:1px solid var(--line);background:#000}
+.shot.scene footer a.btn{text-decoration:none}
+
 /* ---------------------------------------------------------------- traces */
 .traces{display:flex;flex-direction:column;flex:1;min-height:0;padding:12px 16px;gap:10px;overflow:auto}
 .traces-stats{display:flex;align-items:center;gap:18px;flex-wrap:wrap;border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--panel)}
@@ -715,3 +740,57 @@
 .trace-pair{font:13px/1.4 var(--sans);margin-top:4px;white-space:pre-wrap}
 .trace-pair .lbl{display:inline-block;font:600 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-right:8px;min-width:64px}
 .trace-pair.chosen .lbl{color:#3fa46a}.trace-pair.rejected .lbl{color:#d0453f}
+
+/* ---------------------------------------------------------------- pipeline: the training pie */
+.pipeline{display:flex;flex-direction:column;flex:1;min-height:0;padding:12px 16px;gap:12px;overflow:auto}
+.pipeline-launch{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--panel)}
+.pipeline-launch label{display:flex;flex-direction:column;gap:4px;font:11.5px var(--mono);color:var(--faint)}
+.pipeline-launch label.check{flex-direction:row;align-items:center;gap:6px;padding-bottom:6px;color:var(--muted)}
+.pipeline-launch .doc{flex-basis:100%;margin:0;font-size:12.5px;color:var(--muted);max-width:90ch}
+.pipeline-list{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.pipeline-list .chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:4px 10px;font:12px var(--mono);cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.pipeline-list .chip.on{color:var(--ink);border-color:var(--accent)}
+.pipeline-list .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.pipeline-list .chip .dot.running{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+.pipeline-list .chip .dot.done{background:#3fa46a}.pipeline-list .chip .dot.failed{background:#d0453f}.pipeline-list .chip .dot.paused{background:#c9962b}
+.pipeline-active{border:1.5px solid var(--line);border-radius:12px;background:var(--panel);padding:10px 14px;display:flex;flex-direction:column;gap:10px}
+.pipeline-active header{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pipeline-active h2{font:600 15px var(--sans);margin:0}
+.pipeline-active .status-pill[data-status="running"]{color:var(--accent);border-color:var(--accent)}
+.pipeline-active .status-pill[data-status="done"]{color:#3fa46a;border-color:#3fa46a}
+.pipeline-active .status-pill[data-status="failed"]{color:#d0453f;border-color:#d0453f}
+.pipeline-active .status-pill[data-status="paused"]{color:#c9962b;border-color:#c9962b}
+.pipeline-flow{overflow-x:auto;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px}
+.pipeline-flow svg{display:block;font-family:var(--sans)}
+.pipe-card rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.pipe-card.running rect{stroke:var(--accent);stroke-width:2}
+.pipe-card.done rect{stroke:#3fa46a}
+.pipe-card.failed rect{stroke:#d0453f;stroke-width:2}
+.pipe-card .name{font:600 13px var(--sans);fill:var(--ink)}
+.pipe-card .recipe,.pipe-card .meta{font:10.5px var(--mono);fill:var(--faint)}
+.pipe-card .metric{font:12px var(--mono);fill:var(--ink)}
+.pipe-card .st{font:600 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;fill:var(--faint)}
+.pipe-card.running .st{fill:var(--accent)}.pipe-card.done .st{fill:#3fa46a}.pipe-card.failed .st{fill:#d0453f}
+.pipe-card a .meta{fill:var(--accent);text-decoration:underline;cursor:pointer}
+.pipe-edge{stroke:var(--faint);stroke-width:1.5;fill:none}
+.pipe-edge.far{stroke-dasharray:3 4;opacity:.7}
+.pipe-arrow{fill:var(--faint)}
+.pipeline-grid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,1.4fr);gap:12px}
+@media (max-width:900px){.pipeline-grid{grid-template-columns:1fr}}
+.pipeline-pie,.pipeline-report{border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pipeline-pie h3,.pipeline-report h3,.pipeline-stages h3{margin:0;font:600 12px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.pipeline-pie .pie{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.pipeline-pie .legend{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font:12px var(--mono);color:var(--muted)}
+.pipeline-pie .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:8px;vertical-align:-1px}
+.pipeline-pie .legend b{color:var(--ink);font-weight:600}
+.pipeline-report .big{font:600 26px var(--sans);color:var(--ink)}
+.pipeline-report .big small{font:12px var(--mono);color:var(--faint);margin-left:8px}
+.pipeline-report .delta.up{color:#3fa46a}.pipeline-report .delta.down{color:#d0453f}
+.pipeline-report pre{margin:0;font:11.5px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;color:var(--muted);max-height:220px;overflow:auto}
+.pipeline-stages{border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.pipeline-stages table{width:100%;border-collapse:collapse;font:12px var(--mono)}
+.pipeline-stages th{text-align:left;font-weight:600;color:var(--faint);padding:4px 6px;border-bottom:1px solid var(--line)}
+.pipeline-stages td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--muted)}
+.pipeline-stages td.name{color:var(--ink);font-weight:600}
+.pipeline-stages td.args{word-break:break-all;max-width:44ch;color:var(--faint)}
+.pipeline-stages td.err{color:#d0453f}

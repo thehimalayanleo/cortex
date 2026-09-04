@@ -252,6 +252,7 @@ export function ChatPanel({ space, spaceName, focusSignal, onClose, agentCalls, 
   };
 
   useEffect(() => onCommand("new-chat", () => void clearChannel()));
+  useEffect(() => onCommand("show-ledger", () => setPanelTab("agent")));
   // "New chat": the old thread is archived on disk (chats/archive), so no confirm is needed.
   const clearChannel = async () => {
     const had = items.length > 0;

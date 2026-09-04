@@ -45,7 +45,7 @@ export interface LabRun {
   status: "queued" | "running" | "stopping" | "done" | "failed" | "stopped";
   started: string; ended: string | null; exit: number | null; error?: string;
   last?: Record<string, number> | null;
-  script?: string; code_preview?: string; cmd?: string;
+  script?: string; code_preview?: string; cmd?: string; origin?: string;
 }
 export interface LabRunDetail extends LabRun { log: string[]; log_lines: number; metrics: Record<string, number>[]; rollouts: Record<string, unknown>[]; result: Record<string, unknown> | null }
 
@@ -220,7 +220,7 @@ export const api = {
     chapters: () => request<LabChapter[]>("/lab/chapters"),
     runs: (limit = 50) => request<LabRun[]>(`/lab/runs${qs({ limit })}`),
     run: (id: string, tail = 200) => request<LabRunDetail>(`/lab/runs/${encodeURIComponent(id)}${qs({ tail })}`),
-    start: (data: { recipe: string; args?: string; executor?: string; code?: string; cmd?: string }) => request<LabRun>("/lab/runs", { method: "POST", body: JSON.stringify(data) }),
+    start: (data: { recipe: string; args?: string; executor?: string; code?: string; cmd?: string; origin?: string }) => request<LabRun>("/lab/runs", { method: "POST", body: JSON.stringify(data) }),
     script: (id: string) => request<{ code: string }>(`/lab/runs/${encodeURIComponent(id)}/script`),
     stop: (id: string) => request<{ ok: boolean }>(`/lab/runs/${encodeURIComponent(id)}/stop`, { method: "POST" }),
     remove: (id: string) => request<{ ok: boolean }>(`/lab/runs/${encodeURIComponent(id)}`, { method: "DELETE" }),

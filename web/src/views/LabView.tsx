@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
 import type { GpuStatus, LabChapter, LabPlan, LabRecipe, LabRun, LabRunDetail, PlanCard, PlanCol } from "../api";
 import { navigate } from "../lib/router";
+import { emitCommand } from "../lib/events";
 import { useAsync } from "../lib/hooks";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
@@ -265,6 +266,9 @@ function Runs({ runId, refresh }: { runId?: string; refresh: number }) {
         <button className="primary" type="submit" disabled={busy}>
           {busy ? "Starting…" : "Run"}
         </button>
+        <button className="btn" type="button" onClick={() => emitCommand("show-ledger")} title="Every tool call made on this page by the chat or a browser agent">
+          Agent ledger
+        </button>
       </form>
       {recipes.data && (
         <p className="muted small lab-doc">{recipes.data.find((r) => r.name === recipe)?.doc || "Pick a recipe. Each one is a short, readable script under lab/recipes."}</p>
@@ -285,6 +289,7 @@ function Runs({ runId, refresh }: { runId?: string; refresh: number }) {
                 <span className="meta">
                   {r.executor} · {r.status}
                   {r.last && typeof r.last.loss === "number" ? ` · loss ${r.last.loss.toFixed(3)}` : ""}
+                  {r.origin && r.origin !== "ui" ? ` · by agent (${r.origin.replace(/^(chat|webmcp):/, "")})` : ""}
                 </span>
               </button>
             </li>
@@ -361,6 +366,11 @@ function RunDetail({ id, onGone }: { id: string; onGone: () => void }) {
           {run.executor} · {run.started}
           {run.ended ? ` → ${run.ended}` : ""}
         </span>
+        {run.origin && run.origin !== "ui" && (
+          <span className="pill ok" title="This run was started by an agent tool call">
+            agent · {run.origin.replace(/^(chat|webmcp):/, "")}
+          </span>
+        )}
         <span className="grow" />
         {(run.status === "running" || run.status === "queued") && (
           <button className="btn sm" onClick={() => api.lab.stop(id).then(() => toast("Stopping"))}>
@@ -392,8 +402,14 @@ function RunDetail({ id, onGone }: { id: string; onGone: () => void }) {
           <pre>{JSON.stringify(run.result, null, 2)}</pre>
         </details>
       )}
+      {run.log.some((l) => l.startsWith("[cortex] $")) && (
+        <details className="lab-result">
+          <summary>How it was launched (the exact command)</summary>
+          <pre>{run.log.filter((l) => l.startsWith("[cortex]")).join("\n")}</pre>
+        </details>
+      )}
       <pre className="lab-log" ref={logRef}>
-        {run.log.join("\n") || "(no output yet)"}
+        {run.log.filter((l) => !l.startsWith("[cortex]")).join("\n") || "(no output yet)"}
       </pre>
     </div>
   );

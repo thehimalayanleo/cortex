@@ -184,6 +184,8 @@ function Shell() {
     return () => window.removeEventListener("cortex:run-code", onRun);
   }, [toast]);
 
+  useEffect(() => onCommand("show-ledger", () => { if (chatPref !== "open") setChatPref("open"); }), [chatPref, setChatPref]);
+
   // "Ask about this paper": make sure the chat is visible before the panel takes the draft.
   useEffect(() => {
     const onAsk = () => {

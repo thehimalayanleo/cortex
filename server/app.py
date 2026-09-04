@@ -415,6 +415,7 @@ class RunIn(BaseModel):
     executor: str | None = "local"
     code: str | None = None  # run this Python source instead of a named recipe
     cmd: str | None = None  # or run this shell command (the terminal)
+    origin: str | None = None  # who started it: ui | chat:<tool> | webmcp:<tool>
 
 
 @app.get("/api/lab/executors")
@@ -495,7 +496,7 @@ def lab_runs(limit: int = 50):
 @app.post("/api/lab/runs")
 def lab_run_start(r: RunIn):
     try:
-        return runs.start(r.recipe, r.args or "", r.executor or "local", r.code, r.cmd)
+        return runs.start(r.recipe, r.args or "", r.executor or "local", r.code, r.cmd, r.origin)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

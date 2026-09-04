@@ -246,7 +246,7 @@ def _write_meta(d: Path, meta: dict) -> None:
     (d / "meta.json").write_text(json.dumps(meta, indent=2))
 
 
-def start(recipe: str, args: str = "", executor: str = "local", code: str | None = None, cmd: str | None = None) -> dict[str, Any]:
+def start(recipe: str, args: str = "", executor: str = "local", code: str | None = None, cmd: str | None = None, origin: str | None = None) -> dict[str, Any]:
     """Launch a recipe; with code= run that Python source as a one-off script (the "scratch" recipe); with cmd= run a shell command (the "shell" recipe)."""
     ex = executors()
     if executor not in ("local", "ssh", "modal"):
@@ -256,7 +256,7 @@ def start(recipe: str, args: str = "", executor: str = "local", code: str | None
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     d = runs_dir() / rid
     d.mkdir(parents=True)
-    meta = {"id": rid, "recipe": recipe, "args": args, "executor": executor, "status": "queued", "started": _now(), "ended": None, "exit": None}
+    meta = {"id": rid, "recipe": recipe, "args": args, "executor": executor, "status": "queued", "started": _now(), "ended": None, "exit": None, "origin": (origin or "ui")[:60]}
     if code is not None:
         if not code.strip():
             raise ValueError("no code given")

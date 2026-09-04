@@ -244,7 +244,7 @@ export const webmcpTools: ModelContextTool[] = [
     description: "Prove the GPU link end to end: run the kernel_bench recipe on the user's RTX 5090 over Tailscale SSH (matmul and attention throughput, KV-cache bytes) and open the run so the person watches the numbers stream in.",
     inputSchema: { type: "object", properties: {} },
     execute: async (i) => {
-      const r = await api.lab.start({ recipe: "kernel_bench", args: "", executor: "ssh" });
+      const r = await api.lab.start({ recipe: "kernel_bench", args: "", executor: "ssh", origin: "webmcp:gpu_benchmark" });
       changed(); navigate({ kind: "lab", run: r.id }); record("gpu_benchmark", i, true, `kernel_bench · ${r.id}`);
       return text(r);
     },
@@ -324,7 +324,7 @@ export const webmcpTools: ModelContextTool[] = [
     description: "Launch a lab recipe on a GPU (executor ssh = the user's box, modal = rented, local = this machine) and open it so the user watches the metrics. recipe: pretrain_nano|midtrain|sft_lora|dpo|grpo_tool|embed_contrastive|eval_suite|redteam_suite|kernel_bench|optim_bench|paint_grpo|lean_eval; args is the script's command line, e.g. '--smoke --steps 200'. Only when the user asks to train, run, or benchmark.",
     inputSchema: { type: "object", properties: { recipe: { type: "string" }, args: { type: "string" }, executor: { type: "string" } }, required: ["recipe"] },
     execute: async (i) => {
-      const r = await api.lab.start({ recipe: s(i.recipe, 60), args: s(i.args || "", 500), executor: s(i.executor || "local", 10) });
+      const r = await api.lab.start({ recipe: s(i.recipe, 60), args: s(i.args || "", 500), executor: s(i.executor || "local", 10), origin: "webmcp:start_run" });
       changed(); navigate({ kind: "lab", run: r.id }); record("start_run", i, true, `${r.recipe} on ${r.executor} · ${r.id}`);
       return text(r);
     },
@@ -334,7 +334,7 @@ export const webmcpTools: ModelContextTool[] = [
     description: "Run a Python snippet (for example a chapter's 'Build it small' block, edited) as a one-off job on the user's GPU box (executor ssh, default), Modal, or locally, and open the run so the person watches the output. Print METRIC {\"step\":..} lines to get charts. Only when the user asks to run code.",
     inputSchema: { type: "object", properties: { code: { type: "string" }, executor: { type: "string" }, args: { type: "string" } }, required: ["code"] },
     execute: async (i) => {
-      const r = await api.lab.start({ recipe: "scratch", code: s(i.code, 60000), executor: s(i.executor || "ssh", 10), args: s(i.args || "", 500) });
+      const r = await api.lab.start({ recipe: "scratch", code: s(i.code, 60000), executor: s(i.executor || "ssh", 10), args: s(i.args || "", 500), origin: "webmcp:run_code" });
       changed(); navigate({ kind: "lab", run: r.id }); record("run_code", i, true, `code on ${r.executor} · ${r.id}`);
       return text(r);
     },
@@ -344,7 +344,7 @@ export const webmcpTools: ModelContextTool[] = [
     description: "Run one shell command in the Lab terminal on the user's GPU box (executor ssh, default; cwd ~/cortex-lab) or this machine (local); the person watches the output stream. Never destructive commands unless explicitly asked.",
     inputSchema: { type: "object", properties: { cmd: { type: "string" }, executor: { type: "string" } }, required: ["cmd"] },
     execute: async (i) => {
-      const r = await api.lab.start({ recipe: "shell", cmd: s(i.cmd, 4000), executor: s(i.executor || "ssh", 10) });
+      const r = await api.lab.start({ recipe: "shell", cmd: s(i.cmd, 4000), executor: s(i.executor || "ssh", 10), origin: "webmcp:shell" });
       changed(); navigate({ kind: "lab", run: r.id }); record("shell", i, true, `$ ${s(i.cmd, 50)} · ${r.executor}`);
       return text(r);
     },

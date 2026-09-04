@@ -319,7 +319,7 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         return g, g.get("message", ""), "cortex://lab/runs"
     if name == "gpu_benchmark":
         from . import runs
-        m = runs.start("kernel_bench", "", "ssh")
+        m = runs.start("kernel_bench", "", "ssh", origin="chat:gpu_benchmark")
         return m, f"kernel_bench on the GPU box · {m['id']}", f"cortex://lab/run/{m['id']}"
     if name == "gpu_setup":
         from . import runs
@@ -356,15 +356,15 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         return rows, f"runs · {len(rows)}", "cortex://lab"
     if name == "start_run":
         from . import runs
-        m = runs.start(str(a["recipe"]), str(a.get("args") or ""), str(a.get("executor") or "local"))
+        m = runs.start(str(a["recipe"]), str(a.get("args") or ""), str(a.get("executor") or "local"), origin="chat:start_run")
         return m, f"{m['recipe']} on {m['executor']} · {m['id']}", f"cortex://lab/run/{m['id']}"
     if name == "shell":
         from . import runs
-        m = runs.start("shell", "", str(a.get("executor") or "ssh"), cmd=str(a["cmd"]))
+        m = runs.start("shell", "", str(a.get("executor") or "ssh"), cmd=str(a["cmd"]), origin="chat:shell")
         return m, f"$ {str(a['cmd'])[:60]} · {m['executor']}", f"cortex://lab/run/{m['id']}"
     if name == "run_code":
         from . import runs
-        m = runs.start("scratch", str(a.get("args") or ""), str(a.get("executor") or "ssh"), code=str(a["code"]))
+        m = runs.start("scratch", str(a.get("args") or ""), str(a.get("executor") or "ssh"), code=str(a["code"]), origin="chat:run_code")
         return m, f"code on {m['executor']} · {m['id']}", f"cortex://lab/run/{m['id']}"
     if name == "read_run":
         from . import runs

@@ -41,6 +41,19 @@ function snippetHtml(s: string): string {
   return esc.replace(/&lt;(\/?)(mark|b)&gt;/gi, "<$1mark>");
 }
 
+const LAB_STATION_ITEMS = [
+  { id: "data", title: "Data", hint: "tokens and windows" },
+  { id: "pretrain", title: "Pretrain", hint: "next-token loss, attention map" },
+  { id: "midtrain", title: "Mid-train", hint: "mixture and cooldown" },
+  { id: "posttrain", title: "Post-train", hint: "SFT, then DPO" },
+  { id: "encoder", title: "Encoder", hint: "masked LM to embeddings" },
+  { id: "cluster", title: "Cluster", hint: "k-means on embeddings" },
+  { id: "paint", title: "Paint with code", hint: "GRPO with a rendered reward" },
+  { id: "speculative", title: "Speculative decoding", hint: "draft, then verify" },
+  { id: "moe", title: "Mixture of experts", hint: "router and experts" },
+  { id: "arch", title: "Architecture", hint: "calculator and model probe" },
+];
+
 export function SearchPalette({ open, onClose, onNewNote, onNewSpace, projects, space }: Props) {
   const [q, setQ] = useState("");
   const dq = useDebouncedValue(q.trim(), 150);
@@ -136,6 +149,9 @@ export function SearchPalette({ open, onClose, onNewNote, onNewSpace, projects, 
         { key: "topics", title: "Topics", group: "Go to", run: go({ kind: "topics" }) },
         { key: "lab", title: "Training Lab", group: "Go to", hint: "train in the browser or on a GPU", run: go({ kind: "lab" }) },
         { key: "lab-runs", title: "Lab: GPU runs", group: "Go to", hint: "5090 over SSH, Modal, or local", run: go({ kind: "lab", run: "" }) },
+        { key: "lab-plan", title: "Lab: My plan", group: "Go to", hint: "learning kanban", run: go({ kind: "lab", plan: true }) },
+        { key: "lab-terminal", title: "Lab: Terminal", group: "Go to", hint: "commands on the 5090", run: go({ kind: "lab", terminal: true }) },
+        ...LAB_STATION_ITEMS.map((st) => ({ key: `lab-st:${st.id}`, title: `Lab: ${st.title}`, group: "Lab stations", hint: st.hint, run: go({ kind: "lab", station: st.id }) })),
         ...spaceItems,
         ...themeItems,
       ];
@@ -143,6 +159,9 @@ export function SearchPalette({ open, onClose, onNewNote, onNewSpace, projects, 
     const out: Item[] = [];
     // Typed queries: theme commands match on "theme" or the palette name (like VS Code's "Preferences: Color Theme").
     const q = dq.toLowerCase();
+    for (const st of LAB_STATION_ITEMS) {
+      if (`lab ${st.title} ${st.hint}`.toLowerCase().includes(q)) out.push({ key: `lab-st:${st.id}`, title: `Lab: ${st.title}`, group: "Lab stations", hint: st.hint, run: () => { close(); navigate({ kind: "lab", station: st.id }); } });
+    }
     for (const t of themeItems) {
       if (q.startsWith("theme") || t.title.toLowerCase().includes(q)) out.push(t);
     }

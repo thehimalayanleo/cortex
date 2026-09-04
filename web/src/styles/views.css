@@ -584,3 +584,17 @@
 .kcard{background:var(--panel);border:1.5px solid var(--border-strong,var(--line));border-left-width:4px;box-shadow:0 1px 2px rgba(0,0,0,.12);padding:8px 8px 8px 10px}
 .kcard:hover{border-color:var(--accent)}
 .kmoves .icon-btn{border:1px solid var(--line);border-radius:6px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center}
+
+/* plan header: one row of stat blocks, never wrapping into stacks */
+.lab-plan-head{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:6px 0 2px}
+.lab-plan-head .stat-block{display:flex;flex-direction:column;gap:2px;white-space:nowrap;min-width:0}
+.lab-plan-head .stat-block b{font:600 16px var(--sans);color:var(--ink)}
+.lab-plan-head .stat-block.hot b{color:var(--accent)}
+.lab-plan-head .lab-progress{width:160px}
+.lab-plan-head .score{display:none}
+.lab-plan-add{margin-left:auto}
+/* three columns side by side; scroll sideways if the pane is narrow rather than wrapping Done underneath */
+.kanban{display:grid;grid-template-columns:repeat(3,minmax(240px,1fr));gap:14px;overflow:auto;align-items:stretch}
+.kanban-col{min-height:0;max-height:100%}
+.kanban-col ul{flex:1;min-height:0}
+.kcard .ktitle{font:13px/1.35 var(--sans)}

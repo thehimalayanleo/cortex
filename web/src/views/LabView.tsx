@@ -590,19 +590,20 @@ function Plan({ refresh }: { refresh: number }) {
   return (
     <div className="lab-plan">
       <div className="lab-plan-head">
-        <div className="lab-progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} title={`${plan.done} of ${plan.total} cards done`}>
-          <span style={{ width: `${pct}%` }} />
+        <div className="stat-block">
+          <div className="lab-progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} title={`${plan.done} of ${plan.total} cards done`}>
+            <span style={{ width: `${pct}%` }} />
+          </div>
+          <span className="muted small">{plan.done} of {plan.total} done</span>
         </div>
-        <span className="muted small">
-          {plan.done} of {plan.total} done · {pct}%
-        </span>
-        <span className="score" title={`XP by card: read ${plan.xp_by_kind.read}, station ${plan.xp_by_kind.station}, snippet ${plan.xp_by_kind.build}, recipe ${plan.xp_by_kind.recipe}, self-test ${plan.xp_by_kind.quiz}`}>
-          <b>{plan.xp} XP</b> · level {plan.level} {plan.level_name} · {plan.next_level_xp - plan.xp} to next
-        </span>
-        <span className={`score ${plan.streak > 0 ? "hot" : ""}`} title="Days in a row with at least one card done">
-          streak {plan.streak}
-          {plan.done_today ? ` · ${plan.done_today} today` : ""}
-        </span>
+        <div className="stat-block" title={`XP by card: read ${plan.xp_by_kind.read}, station ${plan.xp_by_kind.station}, snippet ${plan.xp_by_kind.build}, recipe ${plan.xp_by_kind.recipe}, self-test ${plan.xp_by_kind.quiz}`}>
+          <b>{plan.xp} XP</b>
+          <span className="muted small">level {plan.level} · {plan.level_name} · {plan.next_level_xp - plan.xp} to next</span>
+        </div>
+        <div className={`stat-block ${plan.streak > 0 ? "hot" : ""}`} title="Days in a row with at least one card done">
+          <b>{plan.streak} day{plan.streak === 1 ? "" : "s"}</b>
+          <span className="muted small">streak{plan.done_today ? ` · ${plan.done_today} today` : ""}</span>
+        </div>
         <span className="grow" />
         <form
           className="lab-plan-add"

@@ -88,21 +88,31 @@ def real_render(out: Path, keyframe: str, prompt: str, frames: int, size: str, s
         cmd += ["--proto", xp(proto)]
     status(phase="render", msg=" ".join(cmd[:3]) + f" … frames={frames} size={size} steps={steps}")
     t0 = time.time()
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     done = None
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        line = line.rstrip("\n")
-        print(line, flush=True)
-        if line.startswith("DONE "):
-            try:
-                done = json.loads(line[5:])
-            except Exception:
-                pass
-        elif "decoded" in line:
-            metric(step=1, phase_s=time.time() - t0)
-    code = proc.wait()
-    if code != 0:
+    # The box has 29 GB of host RAM and the pipeline stages ~24 GB while loading; right after a previous take the
+    # kernel sometimes SIGKILLs the loader (-9). One retry after the caches settle recovers it.
+    for attempt in range(1, 3):
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if "\r" in line:  # tqdm carriage returns: keep the last state only
+                line = line.split("\r")[-1]
+            print(line, flush=True)
+            if line.startswith("DONE "):
+                try:
+                    done = json.loads(line[5:])
+                except Exception:
+                    pass
+            elif "decoded" in line:
+                metric(step=1, phase_s=time.time() - t0)
+        code = proc.wait()
+        if code == 0:
+            break
+        if code == -9 and attempt == 1:
+            status(phase="retry", msg="the brick was killed while loading (host memory); waiting 30 s and trying once more")
+            time.sleep(30)
+            continue
         raise SystemExit(f"wan brick exited {code}")
     res = json.loads((out / "results.json").read_text()) if (out / "results.json").exists() else (done or {})
     for i, v in enumerate(res.get("per_frame_identity", [])):

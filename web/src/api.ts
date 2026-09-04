@@ -71,10 +71,11 @@ export interface PipelineSummary { id: string; template: string; title: string; 
 export interface Pipeline extends PipelineSummary { out: string; stages: PipelineStage[]; data: { sources: Record<string, number>; total_tokens: number; tokenizer: string } | null; final: Record<string, unknown> | null }
 export interface TraceStats { total: number; by_kind: Record<string, number>; by_month: Record<string, number>; since: string | null; sft_pairs: number; dpo_pairs: number; root: string }
 
-export interface GalaxyPaper { id: string; title: string; year?: number | null; status?: string; topics?: string[]; authors?: string; x: number; y: number; x3: number; y3: number; z3: number; cluster: number; universe: number; near?: [string, number][] }
-export interface GalaxyCluster { id: number; label: string; size: number; cx: number; cy: number; universe: number }
-export interface GalaxyUniverse { id: number; label: string; clusters: number[]; size: number }
-export interface Galaxy { generated: string | null; model?: string; n: number; papers: GalaxyPaper[]; clusters: GalaxyCluster[]; universes: GalaxyUniverse[]; building?: string | null; stale?: boolean; error?: string }
+export interface GalaxyPaper { id: string; title: string; year?: number | null; status?: string; topics?: string[]; authors?: string; x: number; y: number; x3: number; y3: number; z3: number; cluster: number; hood?: number; universe: number; near?: [string, number][] }
+export interface GalaxyCluster { id: number; label: string; size: number; cx: number; cy: number; r?: number; universe: number }
+export interface GalaxyUniverse { id: number; label: string; clusters: number[]; size: number; cx?: number; cy?: number; r?: number }
+export interface GalaxyHood { id: number; label: string; size: number; cluster: number; universe: number; cx: number; cy: number; r: number }
+export interface Galaxy { generated: string | null; model?: string; n: number; papers: GalaxyPaper[]; clusters: GalaxyCluster[]; universes: GalaxyUniverse[]; hoods?: GalaxyHood[]; building?: string | null; stale?: boolean; error?: string }
 export interface GalaxySummary { generated: string | null; n: number; model?: string; stale?: boolean; building?: string | null; universes: { id: number; label: string; size: number }[]; solar_systems: { id: number; label: string; size: number; universe: number }[] }
 
 export class ApiError extends Error {

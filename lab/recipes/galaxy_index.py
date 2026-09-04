@@ -101,7 +101,7 @@ def dbscan_cosine(X: np.ndarray, target_lo: int, target_hi: int) -> tuple[np.nda
     D = np.clip(D, 0.0, 2.0)
     best = None
     for eps in np.linspace(0.08, 0.5, 22):
-        lab = DBSCAN(eps=float(eps), min_samples=3, metric="precomputed").fit_predict(D)
+        lab = DBSCAN(eps=float(eps), min_samples=2, metric="precomputed").fit_predict(D)
         k = len(set(lab)) - (1 if -1 in lab else 0)
         noise = float((lab == -1).mean())
         score = (0 if target_lo <= k <= target_hi else min(abs(k - target_lo), abs(k - target_hi))) + noise * 2
@@ -145,7 +145,8 @@ def main() -> None:
     ap.add_argument("--model", default="BAAI/bge-small-en-v1.5")
     ap.add_argument("--max-chars", type=int, default=6000)
     ap.add_argument("--batch", type=int, default=16)
-    ap.add_argument("--clusters", default="8-30", help="wanted cluster count range")
+    ap.add_argument("--clusters", default="10-40", help="wanted cluster count range")
+    ap.add_argument("--orbit", type=float, default=0.55, help="min cosine to a system centroid for a noise paper to join it")
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--steps", type=int, default=0, help="ignored; accepted for the run protocol")
     a = ap.parse_args()
@@ -170,6 +171,19 @@ def main() -> None:
             model = "hashed-bag-of-words"
     lo, hi = (int(v) for v in a.clusters.split("-"))
     labels, eps = dbscan_cosine(X, lo, hi)
+    # Planets in orbit: a paper DBSCAN left as noise still belongs to the system it is closest to, if that system's
+    # centroid is reasonably near (cosine >= --orbit). Core members keep their label; orbiting ones are marked.
+    core = labels.copy()
+    cids = sorted(c for c in set(labels) if c != -1)
+    if cids:
+        cent = np.stack([X[labels == c].mean(0) for c in cids])
+        cent = cent / (np.linalg.norm(cent, axis=1, keepdims=True) + 1e-9)
+        sims = X @ cent.T
+        for i in np.where(labels == -1)[0]:
+            j = int(np.argmax(sims[i]))
+            if sims[i, j] >= a.orbit:
+                labels[i] = cids[j]
+        status(phase="orbit", msg=f"{int((core == -1).sum() - (labels == -1).sum())} papers attached to their nearest system (cos >= {a.orbit}); {int((labels == -1).sum())} still drifting")
     P2, var2 = pca(X, 2)
     P3, var3 = pca(X, 3)
     P2 = spread(P2)
@@ -209,7 +223,7 @@ def main() -> None:
     for i, p in enumerate(papers):
         rows.append({"id": p["id"], "title": p["title"], "year": p["year"], "status": p["status"], "topics": p["topics"], "authors": str(p["authors"])[:120],
                      "x": float(P2[i, 0]), "y": float(P2[i, 1]), "x3": float(P3[i, 0]), "y3": float(P3[i, 1]), "z3": float(P3[i, 2]),
-                     "cluster": int(labels[i]), "universe": umap.get(int(labels[i]), -1)})
+                     "cluster": int(labels[i]), "universe": umap.get(int(labels[i]), -1), "core": bool(core[i] != -1)})
     # nearest neighbours per paper (for "planets near this one")
     S = X @ X.T
     for i, r in enumerate(rows):

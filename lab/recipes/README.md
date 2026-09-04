@@ -33,9 +33,10 @@ libraries listed in `lab/BRIEF.md` are installed there.
 | `moe_nano.py` | top-k MoE MLP in the minimal GPT, Switch balance loss, router z-loss, per-expert load and a domain x expert usage matrix; active vs total params | 11 | `python lab/recipes/moe_nano.py --smoke --steps 300` | `python lab/recipes/moe_nano.py --steps 2000 --experts 8 --top-k 2` | `modal run lab/recipes/modal_app.py --recipe moe_nano --args "--steps 2000 --experts 8 --top-k 2"` |
 | `lean_eval.py` | a model writes Lean 4 proofs, `lake env lean` grades them; pass@1 with a Wilson interval | 14 | `python lab/recipes/lean_eval.py --smoke` | `python lab/recipes/lean_eval.py --lean-project ~/github-repos/sfp/lean-sfp --theorems my_theorems.jsonl` | not on Modal (needs a Lean toolchain in the image) |
 | `spec_decode.py` | speculative decoding with the exact accept/reject rule; acceptance rate, tokens per target forward, tok/s, and a total-variation exactness check | 17 | `python lab/recipes/spec_decode.py --smoke --steps 300 --k 4` | `python lab/recipes/spec_decode.py --target Qwen/Qwen2.5-1.5B-Instruct --draft Qwen/Qwen2.5-0.5B-Instruct --k 5` | `modal run lab/recipes/modal_app.py --recipe spec_decode --args "--k 5"` |
+| `inspect_model.py` | architecture poking: module tree with shapes and per-block counts, parameter split (embedding / attention / MLP / norms / head, tied or not), derived config (layers, d_model, heads, kv heads, head_dim, vocab, MLP width), FLOPs per token (2N + attention term) and KV bytes per token; then a probe string through forward hooks: residual-stream norm per layer, attention entropy per head, and the logit lens (final norm + unembedding on every layer's residual). Writes `module_table.json`, `per_layer.json`, `attention.json`, `summary.json` for the UI | 11, 13 | `python lab/recipes/inspect_model.py --smoke` (trains the minimal GPT for `--steps`) or `--model out/pretrain_nano/ckpt.pt --text "the cat sat on the"` | `python lab/recipes/inspect_model.py --model Qwen/Qwen2.5-0.5B --text "The capital of France is" --layer 12 --n-heads 8` | `modal run lab/recipes/modal_app.py --recipe inspect_model --args "--model Qwen/Qwen2.5-0.5B"` |
 | `modal_app.py` | run any recipe above on a Modal GPU, stream stdout, keep `--out` in the `cortex-lab-out` volume | all | n/a | n/a | `modal run lab/recipes/modal_app.py --recipe <name> --args "..." --gpu H100` |
 
-`common.py` is the shared module: the stdout protocol, seeding, device choice, the
+`common.py` is the shared module: the stdout protocol (`metric`, `status`, `result`, `rollout`, `clip_text`), seeding, device choice, the
 synthetic corpus, the character tokenizer, the minimal GPT (with a KV cache for
 decoding, left-padded batched generation, an optional recurrent-depth loop and a
 bidirectional mode), the LR schedules, checkpoint helpers, and the bootstrap and
@@ -46,7 +47,7 @@ Chapter numbers refer to `lab/chapters/NN-*.md`. Lab 05's text mentions
 
 ## The METRIC protocol
 
-The Cortex server parses stdout. Three line types matter; everything else is free-form log text.
+The Cortex server parses stdout. Four line types matter; everything else is free-form log text.
 
 ```
 STATUS {"phase": "train", "msg": "2000 steps, batch 32 x 256 tokens, schedule cosine"}
@@ -65,3 +66,33 @@ RESULT {"train_loss": 1.62, "val_loss": 1.71, "checkpoint": "out/pretrain_nano/c
   they stream through SSH and through `modal run` as they are produced.
 
 Helpers: `common.metric(step, **fields)`, `common.status(phase, msg)`, `common.result(**fields)`.
+
+### ROLLOUT lines
+
+```
+ROLLOUT {"step": 5, "group": 0, "idx": 2, "prompt": "q: what is 3 + 5\n", "completion": "<call>{\"name\":\"add\",\"args\":{\"a\":3,\"b\":5}}</call>", "reward": 1.0, "advantage": 0.87, "parse": 1, "tool": 1, "answer": 1, "kl": 0.004, "expected": "..."}
+```
+
+- `ROLLOUT ` + one JSON object per line: what the model actually produced and the
+  numbers that scored it. Unlike METRIC, string fields are expected (prompt,
+  completion, ...); they are truncated at the source (`common.clip_text`: prompts to
+  300 characters, completions to 600). The server appends them to `rollouts.jsonl`.
+- `grpo_tool.py`, `paint_grpo.py`: every `--log-rollouts-every N` steps (default 5,
+  plus step 1 so a short run shows something) one line per sample of the first group
+  of that step, with `step, group, idx, prompt, completion, reward, advantage, kl`
+  and the reward components (`parse, tool, answer` and `expected` for the tool task;
+  `gate, length, similarity, n_commands` for painting). In real mode the lines come
+  from inside the TRL reward function, so `step` counts reward calls (one per
+  generation step) and `advantage` is the group normalization computed for display.
+- `dpo.py`: every `--log-rollouts-every` steps (default 10; trainer logs in real
+  mode) `--log-rollouts-n` pairs (default 3) with `step, idx, prompt, chosen,
+  rejected, chosen_logp, rejected_logp, ref_chosen_logp, ref_rejected_logp,
+  chosen_reward, rejected_reward, margin` (the implicit rewards are
+  `beta * (logp - ref_logp)`; real mode scores them under the policy and the
+  adapter-disabled reference).
+- `spec_decode.py`: the first `--log-passes` verify passes (default 6) with `step`
+  (pass index), `prompt`, `context_tail`, `draft`, `draft_ids`, `proposed`, `accepted`,
+  `accepted_text`, `corrected_token`, `corrected_id`, `correction` (`residual` when a draft
+  token was rejected and the replacement came from max(0, p - q); `bonus` when all k
+  were accepted and the extra token came from p_k) and `emitted`.
+- `0` for any of these flags disables the lines. Helper: `common.rollout(**fields)`.

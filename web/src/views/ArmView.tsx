@@ -6,10 +6,22 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
-import type { ArmEpisode, ArmPlanOut, ArmStatus } from "../api";
+import type { ArmBench, ArmEpisode, ArmPlanOut, ArmStatus, NebiusStatus } from "../api";
 import { navigate } from "../lib/router";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
+
+type P3 = [number, number, number];
+function hull(pts: P3[]): P3[] {
+  const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o: P3, a: P3, b: P3) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: P3[] = [], up: P3[] = [];
+  for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+const pct = (v?: number) => (v == null ? "–" : `${Math.round(v * 100)}%`);
+const MODE_LABEL: Record<string, string> = { oracle: "oracle (ceiling)", joints: "model writes joint angles", skills: "skill program, no repair", "skills+repair": "skill program + simulator repair" };
 
 const LABELS: Record<string, string> = { shoulder_pan: "pan", shoulder_lift: "lift", elbow_flex: "elbow", wrist_flex: "wrist", wrist_roll: "roll", gripper: "grip" };
 
@@ -19,7 +31,12 @@ export function ArmView({ refresh }: { refresh: number }) {
   const [err, setErr] = useState<string | null>(null);
   const [eps, setEps] = useState<ArmEpisode[]>([]);
   const [task, setTask] = useState("");
-  const [instr, setInstr] = useState("wave hello, then reach forward and open the gripper");
+  const [instr, setInstr] = useState("put the red block in the bin");
+  const [mode, setMode] = useState("skills");
+  const [bench, setBench] = useState<ArmBench | null>(null);
+  const [neb, setNeb] = useState<NebiusStatus | null>(null);
+  const [keyIn, setKeyIn] = useState("");
+  const [seed, setSeed] = useState(1);
   const [plan, setPlan] = useState<ArmPlanOut | null>(null);
   const [planning, setPlanning] = useState(false);
   const [port, setPort] = useState("");
@@ -43,7 +60,14 @@ export function ArmView({ refresh }: { refresh: number }) {
   useEffect(() => {
     void load();
     api.arm.episodes().then(setEps).catch(() => undefined);
+    api.arm.bench().then(setBench).catch(() => undefined);
+    api.arm.nebius().then(setNeb).catch(() => undefined);
   }, [load, refresh]);
+  useEffect(() => {
+    if (bench?.status !== "running") return;
+    const t = window.setInterval(() => api.arm.bench().then(setBench).catch(() => undefined), 3000);
+    return () => window.clearInterval(t);
+  }, [bench?.status]);
   useEffect(() => {
     const t = window.setInterval(() => void load(), st?.moving || st?.recording ? 150 : 1000);
     return () => window.clearInterval(t);
@@ -117,6 +141,42 @@ export function ArmView({ refresh }: { refresh: number }) {
         });
         ctx.stroke();
       }
+      // the tabletop: bins as open boxes, blocks as cubes; a held block rides on the tip
+      const tipNow = st.fk.tip;
+      for (const o of st.world?.objects ?? []) {
+        const [x, y, z] = st.world.held === o.name ? tipNow : o.xyz;
+        const h = o.size / 2;
+        if (o.kind === "bin") {
+          const H = o.height ?? 0.04;
+          const ring = (zz: number) => [[-h, -h], [h, -h], [h, h], [-h, h], [-h, -h]].map(([dx, dy]) => proj(x + dx, y + dy, zz));
+          ctx.fillStyle = o.color + "22";
+          const f = ring(0);
+          ctx.beginPath(); f.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.fill();
+          ctx.strokeStyle = o.color + "cc";
+          ctx.lineWidth = 1.5;
+          for (const zz of [0, H]) { const r = ring(zz); ctx.beginPath(); r.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke(); }
+          for (const [dx, dy] of [[-h, -h], [h, -h], [h, h], [-h, h]]) { const a = proj(x + dx, y + dy, 0), b = proj(x + dx, y + dy, H); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+        } else {
+          const corners: P3[] = [];
+          for (const dx of [-h, h]) for (const dy of [-h, h]) for (const dz of [-h, h]) corners.push(proj(x + dx, y + dy, z + dz));
+          const hl = hull(corners);
+          ctx.fillStyle = o.color;
+          ctx.beginPath(); hl.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath(); ctx.fill();
+          const top = [[-h, -h], [h, -h], [h, h], [-h, h]].map(([dx, dy]) => proj(x + dx, y + dy, z + h));
+          ctx.fillStyle = "rgba(255,255,255,0.18)";
+          ctx.beginPath(); top.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath(); ctx.fill();
+        }
+      }
+      // the planned tip path
+      if (plan?.waypoints.length) {
+        ctx.strokeStyle = plan.ok ? "rgba(77,179,157,0.8)" : "rgba(208,69,63,0.8)";
+        ctx.setLineDash([3, 4]);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        plan.waypoints.forEach((w, i) => { const q = proj(w.tip[0], w.tip[1], w.tip[2]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); });
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       // shadow
       const pts = st.fk.points;
       ctx.strokeStyle = "rgba(0,0,0,0.35)";
@@ -170,7 +230,7 @@ export function ArmView({ refresh }: { refresh: number }) {
     ro.observe(c);
     (c as unknown as { __draw?: () => void }).__draw = draw;
     return () => ro.disconnect();
-  }, [st, trail]);
+  }, [st, trail, plan]);
   const redraw = () => (canvasRef.current as unknown as { __draw?: () => void } | null)?.__draw?.();
 
   if (err) return <EmptyState title="Could not reach the arm service" hint={err} />;
@@ -202,6 +262,22 @@ export function ArmView({ refresh }: { refresh: number }) {
           </div>
         </div>
         <div className="arm-panel">
+          <div className="arm-card">
+            <div className="row">
+              <b>Nemotron on Nebius Token Factory</b>
+              <span className="grow" />
+              <span className={`verdict ${neb?.connected ? "ok" : "warn"}`}>{neb?.connected ? "connected" : "not connected"}</span>
+            </div>
+            {neb?.connected ? (
+              <div className="muted small mono">fast {neb.fast} · deep {neb.deep}</div>
+            ) : (
+              <div className="row">
+                <input className="input sm" type="password" placeholder="paste a Token Factory API key" value={keyIn} onChange={(e) => setKeyIn(e.target.value)} autoComplete="off" />
+                <button className="btn sm primary" disabled={keyIn.trim().length < 10} onClick={() => act(api.arm.setNebiusKey(keyIn.trim()), (n) => { setNeb(n); setKeyIn(""); toast(n.connected ? "Token Factory connected" : n.error ?? "Key saved, but no models listed", n.connected ? undefined : "error"); })}>Connect</button>
+              </div>
+            )}
+            {neb && !neb.connected && <div className="muted small">Until then plans come from {neb.provider === "selfhost" ? "self-hosted Nemotron 3 Nano (vLLM on the 5090)" : "the app's chat model"}. The key stays on this machine (~/.config/cortex/nebius.key, mode 600).</div>}
+          </div>
           <div className="arm-card">
             <div className="row">
               <b>Connection</b>
@@ -246,24 +322,63 @@ export function ArmView({ refresh }: { refresh: number }) {
       <div className="arm-bottom">
         <div className="arm-card">
           <div className="row">
-            <b>Plan with the model</b>
+            <b>Give it a task</b>
             <span className="grow" />
-            <span className="muted small">{st.planner}</span>
+            <div className="seg" role="group" aria-label="Planner">
+              {(["skills", "joints"] as const).map((m) => <button key={m} className={`btn sm${mode === m ? " primary" : ""}`} onClick={() => setMode(m)} title={MODE_LABEL[m]}>{m === "skills" ? "skill program" : "joint angles"}</button>)}
+            </div>
           </div>
           <div className="row">
-            <input className="input" value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="what should the arm do?" />
-            <button className="btn sm" disabled={planning} onClick={() => { setPlanning(true); api.arm.plan(instr, false).then(setPlan).catch((e) => toast(errorMessage(e), "error")).finally(() => setPlanning(false)); }}>{planning ? "planning…" : "Plan"}</button>
-            <button className="btn sm primary" disabled={planning || offline} onClick={() => { setPlanning(true); setTrail([]); api.arm.plan(instr, true).then((p) => { setPlan(p); void load(); }).catch((e) => toast(errorMessage(e), "error")).finally(() => setPlanning(false)); }}>Plan and run</button>
+            <input className="input" value={instr} onChange={(e) => setInstr(e.target.value)} placeholder="put the red block in the bin" />
+            <button className="btn sm" disabled={planning} onClick={() => { setPlanning(true); api.arm.plan(instr, false, mode).then(setPlan).catch((e) => toast(errorMessage(e), "error")).finally(() => setPlanning(false)); }}>{planning ? "planning…" : "Plan"}</button>
+            <button className="btn sm primary" disabled={planning || offline} onClick={() => { setPlanning(true); setTrail([]); api.arm.plan(instr, true, mode).then((p) => { setPlan(p); if (!p.executed && !p.refused) toast("Not run: the simulator rejected the plan", "error"); void load(); }).catch((e) => toast(errorMessage(e), "error")).finally(() => setPlanning(false)); }}>Plan and run</button>
+          </div>
+          <div className="row muted small">
+            <span>scene</span>
+            <input className="input sm arm-seed" type="number" min={1} value={seed} onChange={(e) => setSeed(Number(e.target.value) || 1)} aria-label="Scene seed" />
+            <button className="btn sm" onClick={() => act(api.arm.resetWorld(seed, false), () => setPlan(null))}>reset scene</button>
+            <button className="btn sm" onClick={() => act(api.arm.resetWorld(seed, true), () => setPlan(null))} title="adds a purple block 47 cm out, beyond reach">+ unreachable block</button>
+            <span className="grow" />
+            <span>{st.planner}</span>
           </div>
           {plan && (
             <div className="arm-plan">
-              {plan.waypoints.map((w, i) => (
-                <button key={i} className="wp" onClick={() => act(api.arm.joints(w.joints, w.seconds))} title="move to this waypoint">
-                  <span className="mono muted">{i + 1}</span> <b>{w.name || `waypoint ${i + 1}`}</b>
-                  <span className="mono small">{st.joint_names.map((j) => `${LABELS[j]} ${Math.round(w.joints[j])}`).join(" · ")}</span>
-                  <span className="muted small">{w.seconds}s · tip {w.tip.map((v) => v.toFixed(2)).join(", ")}</span>
-                </button>
-              ))}
+              <div className="row">
+                <span className={`verdict ${plan.refused ? "warn" : plan.ok ? "ok" : "bad"}`}>{plan.refused ? "refused" : plan.ok ? "verified by the simulator" : "rejected by the simulator"}</span>
+                <span className="muted small">{plan.executed ? "running on the arm" : plan.ok && !plan.refused ? "not run" : "nothing moved"}</span>
+              </div>
+              {plan.goal && plan.goal.length > 0 && (
+                <div className="small"><span className="muted">declared goal </span><span className="mono">{plan.goal.map((g) => `${g.pred}(${g.obj}${g.target ? `, ${g.target}` : ""}${g.xy ? `, ${g.xy.map((v) => v.toFixed(2)).join(", ")}` : ""})`).join(" ∧ ")}</span></div>
+              )}
+              <div className="arm-attempts">
+                {plan.attempts.map((a, i) => (
+                  <div key={i} className={`att ${a.ok ? "ok" : "bad"}`}>
+                    <span className="mono small">#{i + 1} {a.tier}</span>
+                    <span className="mono small grow">{a.model}</span>
+                    <span className="muted small">{a.seconds}s · {a.issues.filter((x) => x.level === "error").length} errors</span>
+                  </div>
+                ))}
+              </div>
+              {plan.issues.length > 0 && (
+                <ul className="arm-issues">
+                  {plan.issues.map((x, i) => <li key={i} className={x.level}><span className="mono">step {x.step}</span> {x.msg}</li>)}
+                </ul>
+              )}
+              {plan.program && plan.program.length > 0 && (
+                <details>
+                  <summary className="muted small">program ({plan.program.length} steps)</summary>
+                  <pre className="arm-prog">{plan.program.map((op, i) => `${String(i + 1).padStart(2)} ${JSON.stringify(op)}`).join("\n")}</pre>
+                </details>
+              )}
+              <details>
+                <summary className="muted small">{plan.waypoints.length} joint waypoints</summary>
+                {plan.waypoints.map((w, i) => (
+                  <button key={i} className="wp" onClick={() => act(api.arm.joints(w.joints, w.seconds))} title="move to this waypoint">
+                    <span className="mono muted">{i + 1}</span> <b>{w.name || `waypoint ${i + 1}`}</b>
+                    <span className="mono small">{st.joint_names.map((j) => `${LABELS[j]} ${Math.round(w.joints[j])}`).join(" · ")}</span>
+                  </button>
+                ))}
+              </details>
               {plan.note && <div className="muted small">{plan.note}</div>}
             </div>
           )}
@@ -299,6 +414,51 @@ export function ArmView({ refresh }: { refresh: number }) {
             </div>
           )}
         </div>
+      </div>
+      <div className="arm-card">
+        <div className="row">
+          <b>Benchmark</b>
+          <span className="muted small">{bench?.n_tasks ?? 21} tabletop tasks with hidden goals, scored by the simulator (never by a model)</span>
+          <span className="grow" />
+          {bench?.status === "running" && <span className="muted small">{bench.rows?.length ?? 0}/{bench.total}</span>}
+          <button className="btn sm primary" disabled={bench?.status === "running"} onClick={() => act(api.arm.benchStart(), setBench)}>{bench?.status === "running" ? "running…" : "Run benchmark"}</button>
+        </div>
+        {bench?.summary ? (
+          <>
+            <div className="arm-bench">
+              {(bench.modes ?? []).map((m) => {
+                const r = bench.summary?.[m];
+                return (
+                  <div key={m} className={`bm${m === "skills+repair" ? " hero" : ""}`}>
+                    <div className="big">{pct(r?.success)}</div>
+                    <div className="small">{MODE_LABEL[m] ?? m}</div>
+                    <div className="muted small">{r ? `valid ${pct(r.valid)} · ${r.calls} calls · ${r.seconds}s` : "waiting"}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="muted small">Success = the hidden goal holds in the simulated scene after the plan runs (a plan the simulator rejects never runs). Valid = the simulator found no errors. {bench.planner}{bench.finished ? ` · finished ${bench.finished.replace("T", " ")}` : ""}</div>
+            <details>
+              <summary className="muted small">per task</summary>
+              <table className="arm-grid">
+                <thead><tr><th>task</th>{(bench.modes ?? []).map((m) => <th key={m}>{m}</th>)}</tr></thead>
+                <tbody>
+                  {[...new Set((bench.rows ?? []).map((r) => r.task))].sort().map((t) => (
+                    <tr key={t}>
+                      <td className="mono">{t}</td>
+                      {(bench.modes ?? []).map((m) => {
+                        const r = bench.rows?.find((x) => x.task === t && x.mode === m);
+                        return <td key={m} className={r ? (r.success ? "ok" : "bad") : ""} title={r ? [...r.fails, ...r.errors].join("\n") || "ok" : "pending"}>{r ? (r.success ? "✓" : r.refused ? "refused" : "✗") : "·"}</td>;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          </>
+        ) : (
+          <div className="muted small">Four planners on the same tasks (bin, stack, shift, two blocks, nearest, swap, and an out-of-reach block that should be refused): the oracle ceiling, the model writing joint angles, one skill program, and skill programs repaired from simulator feedback.</div>
+        )}
       </div>
     </div>
   );

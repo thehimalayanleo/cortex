@@ -71,9 +71,16 @@ export interface PipelineSummary { id: string; template: string; title: string; 
 export interface Pipeline extends PipelineSummary { out: string; stages: PipelineStage[]; data: { sources: Record<string, number>; total_tokens: number; tokenizer: string } | null; final: Record<string, unknown> | null }
 export interface TraceStats { total: number; by_kind: Record<string, number>; by_month: Record<string, number>; since: string | null; sft_pairs: number; dpo_pairs: number; root: string }
 
-export interface ArmStatus { joints: Record<string, number>; target: Record<string, number>; mode: string; bridge: string | null; port: string; ports: string[]; poses: Record<string, Record<string, number>>; limits: Record<string, [number, number]>; links: Record<string, number>; joint_names: string[]; fk: { points: number[][]; tip: number[]; reach_m: number }; recording: string | null; moving: string | null; host: string; planner: string; episodes: number }
+export interface ArmStatus { joints: Record<string, number>; target: Record<string, number>; mode: string; bridge: string | null; port: string; ports: string[]; poses: Record<string, Record<string, number>>; limits: Record<string, [number, number]>; links: Record<string, number>; joint_names: string[]; fk: { points: number[][]; tip: number[]; reach_m: number }; recording: string | null; moving: string | null; host: string; planner: string; world: ArmWorld; episodes: number }
 export interface ArmEpisode { id: string; task: string; fps: number; joint_names: string[]; started: string; frames: number; seconds?: number; mode?: string; frames_data?: { t: number; joints: Record<string, number>; target?: Record<string, number>; tip: number[] }[] }
-export interface ArmPlanOut { instruction: string; waypoints: { name: string; joints: Record<string, number>; seconds: number; tip: number[] }[]; note: string; planner: string; executed: boolean }
+export interface ArmObject { name: string; kind: "block" | "bin"; xyz: number[]; size: number; height?: number; color: string }
+export interface ArmWorld { objects: ArmObject[]; held: string | null; seed?: number }
+export interface ArmIssue { step: number; level: "error" | "warn"; msg: string }
+export interface ArmAttempt { tier: string; model: string; seconds: number; program?: Record<string, unknown>[]; note?: string; issues: ArmIssue[]; ok: boolean }
+export interface ArmPlanOut { instruction: string; mode: string; waypoints: { name: string; joints: Record<string, number>; seconds: number; tip: number[]; step?: number }[]; note: string; planner: string; executed: boolean; ok: boolean; refused: boolean; issues: ArmIssue[]; attempts: ArmAttempt[]; program?: Record<string, unknown>[]; goal?: { pred: string; obj?: string; target?: string; xy?: number[] }[]; world_after: ArmWorld }
+export interface ArmBenchRow { task: string; mode: string; success: boolean; valid: boolean; refused: boolean; fails: string[]; errors: string[]; calls: number; models: string[]; seconds: number }
+export interface ArmBench { status: string; started?: string; finished?: string; planner?: string; n_tasks?: number; modes?: string[]; total?: number; rows?: ArmBenchRow[]; summary?: Record<string, { n: number; success: number; valid: number; calls: number; seconds: number }> }
+export interface NebiusStatus { connected: boolean; provider?: string; planner?: string; base_url: string; models: string[]; fast?: string; deep?: string; error?: string | null }
 export interface GalaxyPaper { id: string; title: string; year?: number | null; status?: string; topics?: string[]; authors?: string; x: number; y: number; x3: number; y3: number; z3: number; cluster: number; hood?: number; universe: number; near?: [string, number][] }
 export interface GalaxyCluster { id: number; label: string; size: number; cx: number; cy: number; r?: number; universe: number }
 export interface GalaxyUniverse { id: number; label: string; clusters: number[]; size: number; cx?: number; cy?: number; r?: number }
@@ -260,7 +267,12 @@ export const api = {
     recordStart: (task: string) => request<ArmEpisode>("/arm/record/start", { method: "POST", body: JSON.stringify({ task }) }),
     recordStop: () => request<ArmEpisode>("/arm/record/stop", { method: "POST" }),
     play: (id: string, speed = 1) => request<ArmStatus>(`/arm/episodes/${encodeURIComponent(id)}/play?speed=${speed}`, { method: "POST" }),
-    plan: (instruction: string, execute: boolean) => request<ArmPlanOut>("/arm/plan", { method: "POST", body: JSON.stringify({ instruction, execute }) }),
+    plan: (instruction: string, execute: boolean, mode = "skills") => request<ArmPlanOut>("/arm/plan", { method: "POST", body: JSON.stringify({ instruction, execute, mode }) }),
+    resetWorld: (seed: number, far = false) => request<ArmWorld>("/arm/world", { method: "POST", body: JSON.stringify({ seed, far }) }),
+    bench: () => request<ArmBench>("/arm/bench"),
+    benchStart: (seeds = [1, 2, 3]) => request<ArmBench>("/arm/bench", { method: "POST", body: JSON.stringify({ seeds }) }),
+    nebius: () => request<NebiusStatus>("/arm/nebius"),
+    setNebiusKey: (key: string) => request<NebiusStatus>("/arm/nebius", { method: "POST", body: JSON.stringify({ key }) }),
   },
   studio: {
     board: () => request<StudioBoard>("/studio"),

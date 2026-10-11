@@ -11,6 +11,10 @@ cd cortex/web && pnpm install && pnpm build   # build the front end once (pnpm d
 
 Chat uses OpenCode Go by default. The key is read from `~/.local/share/opencode/auth.json` or `OPENCODE_API_KEY`. Any OpenAI-compatible provider works: set `CORTEX_BASE_URL`, `CORTEX_API_KEY`, and `CORTEX_MODEL`.
 
+## Physical AI (Nebius x NVIDIA)
+
+The Lab's **Physical** tab drives an SO-ARM101 desk arm (or simulated servos). Nemotron 3 on Nebius Token Factory writes skill programs; a deterministic simulator verifies them, and rejected programs go back for repair before anything moves. See [PHYSICAL.md](PHYSICAL.md) for the flow, the benchmark and setup.
+
 ## Run it as a login service (macOS)
 
 ```bash

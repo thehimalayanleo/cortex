@@ -133,8 +133,8 @@ export const webmcpTools: ModelContextTool[] = [
   },
   {
     name: "arm",
-    description: "The SO-ARM101 desk robot arm in the Lab (physical AI). action: status | connect (sim or a serial port) | move (joints in degrees or a pose name) | plan (instruction → waypoints; execute to run them) | record_start (task) | record_stop | play (episode id). Opens the Physical tab.",
-    inputSchema: { type: "object", properties: { action: { type: "string" }, joints: { type: "object" }, pose: { type: "string" }, instruction: { type: "string" }, execute: { type: "boolean" }, port: { type: "string" }, task: { type: "string" }, id: { type: "string" } }, required: ["action"] },
+    description: "The SO-ARM101 desk robot arm in the Lab (physical AI). action: status | connect (sim or a serial port) | move (joints in degrees or a pose name) | plan (a tabletop task → Nemotron skill program checked by the simulator, repaired on failure; execute runs a verified plan; mode joints = baseline) | bench_start | bench (success rates per planner) | scene (seed, far) | record_start (task) | record_stop | play (episode id). Opens the Physical tab.",
+    inputSchema: { type: "object", properties: { action: { type: "string" }, joints: { type: "object" }, pose: { type: "string" }, instruction: { type: "string" }, execute: { type: "boolean" }, mode: { type: "string" }, seed: { type: "integer" }, far: { type: "boolean" }, port: { type: "string" }, task: { type: "string" }, id: { type: "string" } }, required: ["action"] },
     execute: async (i) => {
       navigate({ kind: "lab", arm: true });
       const action = String(i.action ?? "status");
@@ -144,7 +144,10 @@ export const webmcpTools: ModelContextTool[] = [
         const st = await api.arm.status();
         const joints = { ...(i.pose ? st.poses[String(i.pose)] ?? {} : {}), ...((i.joints as Record<string, number>) ?? {}) };
         out = await api.arm.joints(joints, 1.2);
-      } else if (action === "plan") out = await api.arm.plan(String(i.instruction ?? ""), !!i.execute);
+      } else if (action === "plan") out = await api.arm.plan(String(i.instruction ?? ""), !!i.execute, String(i.mode ?? "skills"));
+      else if (action === "bench_start") out = await api.arm.benchStart();
+      else if (action === "bench") out = await api.arm.bench();
+      else if (action === "scene") out = await api.arm.resetWorld(Number(i.seed ?? 1), !!i.far);
       else if (action === "record_start") out = await api.arm.recordStart(String(i.task ?? ""));
       else if (action === "record_stop") out = await api.arm.recordStop();
       else if (action === "play") out = await api.arm.play(String(i.id ?? ""));

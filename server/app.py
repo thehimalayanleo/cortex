@@ -918,6 +918,21 @@ class ArmRecord(BaseModel):
 class ArmPlan(BaseModel):
     instruction: str
     execute: bool = False
+    mode: str = "skills"
+
+
+class ArmWorld(BaseModel):
+    seed: int = 1
+    far: bool = False
+
+
+class ArmBench(BaseModel):
+    seeds: list[int] = [1, 2, 3]
+    modes: list[str] = ["oracle", "joints", "skills", "skills+repair"]
+
+
+class NebiusKey(BaseModel):
+    key: str
 
 
 @app.get("/api/arm")
@@ -1015,9 +1030,44 @@ def arm_play(eid: str, speed: float = 1.0):
 @app.post("/api/arm/plan")
 def arm_plan(p: ArmPlan):
     try:
-        return arm.plan(p.instruction, p.execute)
+        return arm.plan(p.instruction, p.execute, p.mode)
     except Exception as e:
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/arm/world")
+def arm_world_get():
+    return arm.world()
+
+
+@app.post("/api/arm/world")
+def arm_world_reset(w: ArmWorld):
+    return arm.reset_world(w.seed, w.far)
+
+
+@app.get("/api/arm/bench")
+def arm_bench_get():
+    return arm.bench_result()
+
+
+@app.post("/api/arm/bench")
+def arm_bench_start(b: ArmBench):
+    try:
+        return arm.bench_start(tuple(b.seeds), tuple(m for m in b.modes if m in arm.MODES))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.get("/api/arm/nebius")
+def arm_nebius():
+    return arm.nebius_status()
+
+
+@app.post("/api/arm/nebius")
+def arm_nebius_key(k: NebiusKey):
+    if len(k.key.strip()) < 10:
+        raise HTTPException(400, "that does not look like a key")
+    return arm.set_nebius_key(k.key)
 
 
 

@@ -162,8 +162,10 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"port": {"type": "string"}, "sim": {"type": "boolean"}}}}},
     {"type": "function", "function": {"name": "arm_record", "description": "Record an episode (LeRobot-style frames of joints at fps) while the arm moves: action start (with a task description) or stop. Or list to see episodes, play with an id to replay one.",
         "parameters": {"type": "object", "properties": {"action": {"type": "string", "enum": ["start", "stop", "list", "play"]}, "task": {"type": "string"}, "id": {"type": "string"}}, "required": ["action"]}}},
-    {"type": "function", "function": {"name": "arm_plan", "description": "Turn an instruction ('wave hello', 'reach to the left and open the gripper') into 2-8 joint waypoints with the planner model and, when execute=true, run them on the arm. Returns the waypoints with end-effector positions.",
-        "parameters": {"type": "object", "properties": {"instruction": {"type": "string"}, "execute": {"type": "boolean"}}, "required": ["instruction"]}}},
+    {"type": "function", "function": {"name": "arm_plan", "description": "Give the arm a tabletop task ('put the red block in the bin', 'stack green on red'). Nemotron on Nebius Token Factory writes a skill program over the scene's objects, a deterministic simulator checks reach, collisions and grasps, and rejected programs go back to the model for repair (the last repair escalates to the deep tier). execute=true runs a verified plan. Returns the program, every attempt, the simulator's issues, and the scene afterwards. mode=joints uses the old planner that writes joint angles directly (the baseline).",
+        "parameters": {"type": "object", "properties": {"instruction": {"type": "string"}, "execute": {"type": "boolean"}, "mode": {"type": "string", "enum": ["skills", "joints"]}}, "required": ["instruction"]}}},
+    {"type": "function", "function": {"name": "arm_bench", "description": "The arm benchmark: tabletop tasks with hidden goals (bin, stack, shift, two blocks, nearest, swap, an out-of-reach block that should be refused), scored by the simulator for four planners: oracle (hand-written ceiling), joints (model writes angles), skills (one program, no repair), skills+repair. action start launches it in the background; action read returns progress and success rates.",
+        "parameters": {"type": "object", "properties": {"action": {"type": "string", "enum": ["start", "read"]}, "seeds": {"type": "array", "items": {"type": "integer"}}}, "required": ["action"]}}},
     {"type": "function", "function": {"name": "galaxy", "description": "The library as a map: universes (broad areas) containing solar systems (tight clusters of papers) with labels and sizes, computed by embedding every paper (bge-small) and clustering (DBSCAN). Give a solar system id to list its papers. Use to answer 'what areas does my library cover' or 'which papers sit near X'.",
         "parameters": {"type": "object", "properties": {"system": {"type": "integer"}}}}},
     {"type": "function", "function": {"name": "read_paper", "description": "Read a library paper: metadata, reading notes, and up to 12000 characters of extracted text starting at offset.",
@@ -355,8 +357,16 @@ def _exec(name: str, a: dict) -> tuple[object, str, str]:
         return eps, f"{len(eps)} episodes", "cortex://lab/arm"
     if name == "arm_plan":
         from . import arm
-        out = arm.plan(str(a["instruction"]), bool(a.get("execute")))
-        return out, f"{len(out['waypoints'])} waypoints · {out['planner']}" + (" · executing" if out["executed"] else ""), "cortex://lab/arm"
+        out = arm.plan(str(a["instruction"]), bool(a.get("execute")), str(a.get("mode") or "skills"))
+        verdict = "refused" if out["refused"] else ("verified" if out["ok"] else "rejected by the simulator")
+        return out, f"{len(out['waypoints'])} waypoints · {verdict} after {len(out['attempts'])} call(s)" + (" · executing" if out["executed"] else ""), "cortex://lab/arm"
+    if name == "arm_bench":
+        from . import arm
+        if a.get("action") == "start":
+            st = arm.bench_start(tuple(a.get("seeds") or (1, 2, 3)))
+            return {k: v for k, v in st.items() if k != "rows"}, f"benchmark started · {st['total']} runs", "cortex://lab/arm"
+        r = arm.bench_result()
+        return {k: v for k, v in r.items() if k != "rows"}, f"benchmark {r.get('status')} · {len(r.get('rows', []))}/{r.get('total', 0)}", "cortex://lab/arm"
     if name == "galaxy":
         from . import galaxy
         if a.get("system") is not None:
@@ -585,7 +595,7 @@ def _context_line(ctx: dict | None) -> str:
         where = f"station '{cid}'" if cid else "the overview"
         return (f"\nOPEN IN THE APP RIGHT NOW: the Training Lab, {where}. The lab has in-browser stations (data, pretrain, midtrain, posttrain, encoder, cluster, paint) "
                 "that train a tiny transformer with tf.js, 15 teaching chapters (list_lab_chapters, then read_note on a slug like lab-05-preference-and-rl), "
-                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot; characters: list_characters, build_character; scenes: plan_scene, render_scene, assemble_scene), a data collector (collect, list_traces), a physical-AI arm (arm_status, arm_connect, arm_move, arm_record, arm_plan; Lab tab Physical), training pipelines (the training pie: list_pipelines, start_pipeline, read_pipeline, retry_stage; Lab 21), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
+                "GPU runs (list_runs, start_run, read_run, run_code, shell), a Studio for agentic cinema (studio_board, plan_shots, set_shot, render_shot, refresh_shot; characters: list_characters, build_character; scenes: plan_scene, render_scene, assemble_scene), a data collector (collect, list_traces), a physical-AI arm (arm_status, arm_connect, arm_move, arm_record, arm_plan, arm_bench; Lab tab Physical), training pipelines (the training pie: list_pipelines, start_pipeline, read_pipeline, retry_stage; Lab 21), and a learning plan (lab_plan, lab_plan_add, lab_plan_remove, lab_plan_move) the user steers through you: when they say what they want to learn, add cards (and write a note with topics [lab] if they want a lesson), and when they pass a quiz, move the card. Teach like a pedantic, careful instructor: define terms, derive, and quiz the user when they ask to be tested. "
                 "Link: cortex://lab")
     return ""
 

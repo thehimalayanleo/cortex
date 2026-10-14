@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
-import type { ArmBench, ArmEpisode, ArmPlanOut, ArmStatus, NebiusStatus } from "../api";
+import type { ArmBench, ArmEpisode, ArmPlanOut, ArmStatus, ArmTrain, NebiusStatus } from "../api";
 import { navigate } from "../lib/router";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
@@ -37,6 +37,9 @@ export function ArmView({ refresh }: { refresh: number }) {
   const [neb, setNeb] = useState<NebiusStatus | null>(null);
   const [keyIn, setKeyIn] = useState("");
   const [seed, setSeed] = useState(1);
+  const [train, setTrain] = useState<ArmTrain | null>(null);
+  const [trainSeed, setTrainSeed] = useState(6);
+  const [trainSafety, setTrainSafety] = useState(true);
   const [plan, setPlan] = useState<ArmPlanOut | null>(null);
   const [planning, setPlanning] = useState(false);
   const [port, setPort] = useState("");
@@ -62,7 +65,13 @@ export function ArmView({ refresh }: { refresh: number }) {
     api.arm.episodes().then(setEps).catch(() => undefined);
     api.arm.bench().then(setBench).catch(() => undefined);
     api.arm.nebius().then(setNeb).catch(() => undefined);
+    api.arm.train().then(setTrain).catch(() => undefined);
   }, [load, refresh]);
+  useEffect(() => {
+    if (train?.status !== "running" && train?.status !== "queued") return;
+    const t = window.setInterval(() => api.arm.train().then(setTrain).catch(() => undefined), 4000);
+    return () => window.clearInterval(t);
+  }, [train?.status]);
   useEffect(() => {
     if (bench?.status !== "running") return;
     const t = window.setInterval(() => api.arm.bench().then(setBench).catch(() => undefined), 3000);
@@ -414,6 +423,45 @@ export function ArmView({ refresh }: { refresh: number }) {
             </div>
           )}
         </div>
+      </div>
+      <div className="arm-card">
+        <div className="row">
+          <b>Train the planner</b>
+          <span className="muted small">LoRA on simulator-verified programs for Nemotron 3 Nano 4B, on the 5090; then it becomes the planner</span>
+          <span className="grow" />
+          <label className="muted small arm-check"><input type="checkbox" checked={trainSafety} onChange={(e) => setTrainSafety(e.target.checked)} /> safety examples</label>
+          <span className="muted small">seed</span>
+          <input className="input sm arm-seed" type="number" min={1} value={trainSeed} onChange={(e) => setTrainSeed(Number(e.target.value) || 1)} aria-label="Training seed" />
+          <button className="btn sm primary" disabled={train?.status === "running" || train?.status === "queued"}
+            onClick={() => act(api.arm.trainStart(trainSeed, trainSafety), () => api.arm.train().then(setTrain))}>
+            {train?.status === "running" || train?.status === "queued" ? "training…" : "Train on the 5090"}
+          </button>
+        </div>
+        {train?.run && (
+          <div className="row muted small">
+            <span>run {train.run} · {train.status}</span>
+            {train.metrics && train.metrics.length > 0 && <span className="mono">step {train.metrics[train.metrics.length - 1].step} · loss {train.metrics[train.metrics.length - 1].loss.toFixed(3)}</span>}
+            <button className="lnk" onClick={() => navigate({ kind: "lab", run: train.run! })}>log</button>
+          </div>
+        )}
+        {train?.result ? (
+          <div className="arm-bench">
+            {([
+              ["plans that work on new tables", train.result.base.plan_success, train.result.tuned.plan_success, true],
+              ["refuses unsafe arm requests (for a safety reason)", null, train.result.tuned.unsafe_arm_safe_refusal ?? null, true],
+              ["refuses harmful chat requests", train.result.base.advbench_refusal, train.result.tuned.advbench_refusal, true],
+              ["refuses ordinary tasks that mention people", null, train.result.tuned.benign_people_refusal ?? null, false],
+            ] as [string, number | null, number | null, boolean][]).map(([label, before, after, upGood]) => (
+              <div key={label} className={`bm${label.startsWith("plans") ? " hero" : ""}`}>
+                <div className="big">{pct(after ?? undefined)}</div>
+                <div className="small">{label}</div>
+                <div className="muted small">{before != null ? `base model ${pct(before)}` : upGood ? "higher is better" : "lower is better"}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="muted small">Trains one seed (about 2 minutes), then scores it on held-out tables 31-40 and on refusal checks (about 15 minutes); the planner switches to the new adapter when it finishes.</div>
+        )}
       </div>
       <div className="arm-card">
         <div className="row">

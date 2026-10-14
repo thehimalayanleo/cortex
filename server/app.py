@@ -935,6 +935,12 @@ class NebiusKey(BaseModel):
     key: str
 
 
+class ArmTrain(BaseModel):
+    seed: int = 6
+    safety: bool = True
+    max_steps: int = 0
+
+
 @app.get("/api/arm")
 def arm_status():
     return arm.status()
@@ -1056,6 +1062,19 @@ def arm_bench_start(b: ArmBench):
         return arm.bench_start(tuple(b.seeds), tuple(m for m in b.modes if m in arm.MODES))
     except ValueError as e:
         raise HTTPException(409, str(e))
+
+
+@app.post("/api/arm/train")
+def arm_train_start(t: ArmTrain):
+    try:
+        return arm.train_start(t.seed, t.safety, t.max_steps)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.get("/api/arm/train")
+def arm_train_status():
+    return arm.train_status()
 
 
 @app.get("/api/arm/nebius")

@@ -613,6 +613,34 @@ def run_waypoints(wps: list[dict[str, Any]], timeline: list[dict[str, Any]] | No
     return status()
 
 
+# ---------------------------------------------------------------- train the planner on the GPU box (lab/recipes/arm_train.py)
+
+def train_start(seed: int = 6, safety: bool = True, max_steps: int = 0) -> dict[str, Any]:
+    import shutil
+    if not os.environ.get("CORTEX_SSH_HOST"):
+        raise ValueError("training needs the GPU box (CORTEX_SSH_HOST)")
+    st = _load()
+    last = st.get("train_run")
+    if last:
+        r = runs.read_run(last, tail=0, max_metrics=0)
+        if r and r["status"] in ("queued", "running"):
+            raise ValueError("a training run is already going")
+    shutil.copy(Path(__file__).with_name("arm_world.py"), runs.RECIPES / "armft" / "arm_world.py")  # ship the same simulator
+    args = f"--seed {int(seed)}" + (" --safety" if safety else "") + (f" --max-steps {int(max_steps)}" if max_steps else "")
+    m = runs.start("arm_train", args, "ssh", origin="arm")
+    st["train_run"] = m["id"]
+    _save(st)
+    return m
+
+
+def train_status() -> dict[str, Any]:
+    rid = _load().get("train_run")
+    if not rid:
+        return {"run": None}
+    r = runs.read_run(rid, tail=40, max_metrics=400) or {}
+    return {"run": rid, "status": r.get("status"), "result": r.get("result"), "metrics": r.get("metrics", []), "log": r.get("log", [])[-30:]}
+
+
 # ---------------------------------------------------------------- benchmark: does the model's plan actually do the task?
 
 _bench: dict[str, Any] = {"thread": None}

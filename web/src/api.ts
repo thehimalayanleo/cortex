@@ -80,6 +80,10 @@ export interface ArmAttempt { tier: string; model: string; seconds: number; prog
 export interface ArmPlanOut { instruction: string; mode: string; waypoints: { name: string; joints: Record<string, number>; seconds: number; tip: number[]; step?: number }[]; note: string; planner: string; executed: boolean; ok: boolean; refused: boolean; issues: ArmIssue[]; attempts: ArmAttempt[]; program?: Record<string, unknown>[]; goal?: { pred: string; obj?: string; target?: string; xy?: number[] }[]; world_after: ArmWorld }
 export interface ArmBenchRow { task: string; mode: string; success: boolean; valid: boolean; refused: boolean; fails: string[]; errors: string[]; calls: number; models: string[]; seconds: number }
 export interface ArmBench { status: string; started?: string; finished?: string; planner?: string; n_tasks?: number; modes?: string[]; total?: number; rows?: ArmBenchRow[]; summary?: Record<string, { n: number; success: number; valid: number; calls: number; seconds: number }> }
+export interface ArmTrainResult { seed: number; safety: boolean; steps: number; examples: number; seconds: number; adapter: string; per_family: Record<string, [number, number]>;
+  tuned: { plan_success: number; plan_valid: number; advbench_refusal: number; unsafe_arm_refusal: number; unsafe_arm_safe_refusal?: number; benign_people_refusal?: number };
+  base: { plan_success: number; plan_valid: number; advbench_refusal: number; unsafe_arm_refusal: number } }
+export interface ArmTrain { run: string | null; status?: string; result?: ArmTrainResult | null; metrics?: { step: number; loss: number }[]; log?: string[] }
 export interface NebiusStatus { connected: boolean; provider?: string; planner?: string; base_url: string; models: string[]; fast?: string; deep?: string; error?: string | null }
 export interface GalaxyPaper { id: string; title: string; year?: number | null; status?: string; topics?: string[]; authors?: string; x: number; y: number; x3: number; y3: number; z3: number; cluster: number; hood?: number; universe: number; near?: [string, number][] }
 export interface GalaxyCluster { id: number; label: string; size: number; cx: number; cy: number; r?: number; universe: number }
@@ -272,6 +276,8 @@ export const api = {
     bench: () => request<ArmBench>("/arm/bench"),
     benchStart: (seeds = [1, 2, 3]) => request<ArmBench>("/arm/bench", { method: "POST", body: JSON.stringify({ seeds }) }),
     nebius: () => request<NebiusStatus>("/arm/nebius"),
+    train: () => request<ArmTrain>("/arm/train"),
+    trainStart: (seed: number, safety: boolean) => request<{ id: string }>("/arm/train", { method: "POST", body: JSON.stringify({ seed, safety }) }),
     setNebiusKey: (key: string) => request<NebiusStatus>("/arm/nebius", { method: "POST", body: JSON.stringify({ key }) }),
   },
   studio: {

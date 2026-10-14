@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import arm, galaxy, agents, chat, pipeline, runs, studio, telemetry, traces, vault
+from . import arm, posttrain, galaxy, agents, chat, pipeline, runs, studio, telemetry, traces, vault
 
 app = FastAPI(title="Cortex", version="0.1")
 
@@ -935,6 +935,14 @@ class NebiusKey(BaseModel):
     key: str
 
 
+class PostJob(BaseModel):
+    task: str = "arm"
+    method: str = "sft"
+    model: str = "mlx-community/Qwen3-0.6B-4bit"
+    iters: int = 60
+    safety: bool = True
+
+
 class ArmTrain(BaseModel):
     seed: int = 6
     safety: bool = True
@@ -1075,6 +1083,19 @@ def arm_train_start(t: ArmTrain):
 @app.get("/api/arm/train")
 def arm_train_status():
     return arm.train_status()
+
+
+@app.get("/api/post")
+def post_overview():
+    return posttrain.overview()
+
+
+@app.post("/api/post/jobs")
+def post_start(j: PostJob):
+    try:
+        return posttrain.start(j.task, j.method, j.model, j.iters, j.safety)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/arm/nebius")

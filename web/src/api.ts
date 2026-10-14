@@ -84,6 +84,14 @@ export interface ArmTrainResult { seed: number; safety: boolean; steps: number; 
   tuned: { plan_success: number; plan_valid: number; advbench_refusal: number; unsafe_arm_refusal: number; unsafe_arm_safe_refusal?: number; benign_people_refusal?: number };
   base: { plan_success: number; plan_valid: number; advbench_refusal: number; unsafe_arm_refusal: number } }
 export interface ArmTrain { run: string | null; status?: string; result?: ArmTrainResult | null; metrics?: { step: number; loss: number }[]; log?: string[] }
+export interface PtEval { task_score: number; n: number; refusal: number; n_refusal: number; samples: string[]; seconds: number; peak_gb?: number }
+export interface PtResult { mode?: string; model?: string; task?: string; adapter?: string; seconds?: number; train_seconds?: number; estimate_gb?: number;
+  base?: PtEval; tuned?: PtEval; verdict?: { promote: boolean; reasons: string[] };
+  /* arm_train on the 5090 */ tuned_arm?: unknown }
+export interface PtJob { id: string; run: string; task: string; method: string; model: string; where: string; iters: number; safety: boolean; started: string;
+  status: string; result: (PtResult & Record<string, unknown>) | null; metrics: { step: number; loss?: number; val_loss?: number; reward?: number; peak_gb?: number }[]; log: string[] }
+export interface PtOverview { tasks: { id: string; label: string; verifier: string; safety: boolean }[]; methods: { id: string; label: string; doc: string }[];
+  models: { id: string; label: string; engine: string; tasks?: string[]; estimate_gb: Record<string, number> | null; fits: Record<string, boolean> | null }[]; cap_gb: number; jobs: PtJob[] }
 export interface NebiusStatus { connected: boolean; provider?: string; planner?: string; base_url: string; models: string[]; fast?: string; deep?: string; error?: string | null }
 export interface GalaxyPaper { id: string; title: string; year?: number | null; status?: string; topics?: string[]; authors?: string; x: number; y: number; x3: number; y3: number; z3: number; cluster: number; hood?: number; universe: number; near?: [string, number][] }
 export interface GalaxyCluster { id: number; label: string; size: number; cx: number; cy: number; r?: number; universe: number }
@@ -279,6 +287,10 @@ export const api = {
     train: () => request<ArmTrain>("/arm/train"),
     trainStart: (seed: number, safety: boolean) => request<{ id: string }>("/arm/train", { method: "POST", body: JSON.stringify({ seed, safety }) }),
     setNebiusKey: (key: string) => request<NebiusStatus>("/arm/nebius", { method: "POST", body: JSON.stringify({ key }) }),
+  },
+  post: {
+    overview: () => request<PtOverview>("/post"),
+    start: (job: { task: string; method: string; model: string; iters: number; safety: boolean }) => request<PtJob>("/post/jobs", { method: "POST", body: JSON.stringify(job) }),
   },
   studio: {
     board: () => request<StudioBoard>("/studio"),

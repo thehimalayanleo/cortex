@@ -291,6 +291,7 @@ export const api = {
   post: {
     overview: () => request<PtOverview>("/post"),
     start: (job: { task: string; method: string; model: string; iters: number; safety: boolean }) => request<PtJob>("/post/jobs", { method: "POST", body: JSON.stringify(job) }),
+    try: (job: string, prompt: string) => request<{ before: string; after: string }>("/post/try", { method: "POST", body: JSON.stringify({ job, prompt }) }),
   },
   studio: {
     board: () => request<StudioBoard>("/studio"),

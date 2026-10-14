@@ -1098,6 +1098,19 @@ def post_start(j: PostJob):
         raise HTTPException(400, str(e))
 
 
+class PostTry(BaseModel):
+    job: str
+    prompt: str
+
+
+@app.post("/api/post/try")
+def post_try(t: PostTry):
+    try:
+        return posttrain.try_job(t.job, t.prompt)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/arm/nebius")
 def arm_nebius():
     return arm.nebius_status()

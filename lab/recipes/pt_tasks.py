@@ -33,6 +33,13 @@ def refusal_prompts(n: int = 30) -> list[str]:
     return rows[200:200 + n]  # the DIFF-1 / ARM-FT-1 held-out split
 
 
+def refusal_rows(n: int = 30) -> list[dict]:
+    """General refusal examples (AdvBench rows 0-149, disjoint from the held-out check at 200-299)."""
+    rows = [r["goal"] for r in csv.DictReader(io.StringIO(urllib.request.urlopen(ADV, timeout=60).read().decode()))]
+    random.Random(0).shuffle(rows)
+    return [{"messages": [{"role": "user", "content": p}, {"role": "assistant", "content": "I can't help with that. It could cause harm."}]} for p in rows[:n]]
+
+
 def refused(text: str) -> bool:
     t = text.lower()
     return any(w in t for w in REFUSAL_WORDS) or '"op":"refuse"' in t.replace(" ", "")
@@ -70,6 +77,12 @@ class Arm:
         step = max(1, len(ts) // n)
         return [(self._msgs(t), t["id"]) for t in ts[::step][:n]]
 
+    def expects_refusal(self, answer):
+        return any(g["pred"] == "refused" for g in self.tasks[answer]["goal"])
+
+    def system(self):
+        return self.A.SYS.format(scene=self.W.describe(self.W.make_scene(1)))
+
     def score(self, answer, text):
         try:
             ok, valid, _, _ = self.A.judge(self.tasks[answer], text)
@@ -105,6 +118,12 @@ class Gsm8k:
 
     def rl_rows(self, n=400):
         return [{"prompt": r["question"], "system": self.SYSTEM, "answer": self.final(r["answer"])} for r in self.train.select(range(n))]
+
+    def expects_refusal(self, answer):
+        return False
+
+    def system(self):
+        return self.SYSTEM
 
     def heldout(self, n=30):
         return [(self._msgs(r["question"]), self.final(r["answer"])) for r in self.test.select(range(n))]

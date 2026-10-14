@@ -85,14 +85,38 @@ def start(task: str, method: str, model: str, iters: int = 60, safety: bool = Tr
         run = arm.train_start(seed=seed, safety=safety)
         where = "5090"
     else:
-        args = f"--mode {method} --task {task} --model {model} --iters {int(iters)}" + (" --safety" if safety and task == "arm" else "")
+        args = f"--mode {method} --task {task} --model {model} --iters {int(iters)}" + (" --safety" if safety else "")
         if method == "grpo":
             args += " --seq 768 --max-completion 400"
         run = runs.start("mlx_post", args, "local", origin="posttrain")
         where = "this Mac (MLX)"
     job = {"id": time.strftime("%Y%m%d-%H%M%S"), "run": run["id"], "task": task, "method": method, "model": model,
-           "where": where, "iters": iters, "safety": bool(safety and task == "arm"), "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+           "where": where, "iters": iters, "safety": bool(safety), "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
     js = _jobs()
     js.append(job)
     _path().write_text(json.dumps(js, indent=1))
     return job
+
+
+def try_job(job_id: str, prompt: str) -> dict[str, Any]:
+    """Ask the same question to the base model and to the job's trained adapter (this Mac, MLX)."""
+    import shlex
+    import subprocess
+    job = next((j for j in jobs() if j["id"] == job_id), None)
+    if not job:
+        raise ValueError("no such job")
+    adapter = (job.get("result") or {}).get("adapter")
+    if not adapter or not str(adapter).endswith(".safetensors"):
+        raise ValueError("this job has no Mac adapter to try (the 5090 arm planner is in the Physical tab)")
+    py = shlex.split(os.environ.get("CORTEX_MLX_PYTHON") or "uv run --python 3.12 --with mlx-lm-lora==5.8.6 --with mlx-lm==0.32.0 --with datasets python")
+    out = {}
+    for name, extra in (("before", []), ("after", ["--resume", adapter])):
+        cmd = py + [str(runs.RECIPES / "mlx_post.py"), "--mode", "infer", "--task", job["task"], "--model", job["model"], "--prompt", prompt, *extra]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        line = next((l for l in r.stdout.splitlines() if l.startswith("RESULT ")), None)
+        if not line:
+            raise ValueError(f"inference failed: {(r.stderr or r.stdout)[-300:]}")
+        out[name] = json.loads(line[7:]).get("reply", "")
+    if job["task"] in ("arm", "gsm8k"):  # score both answers when the prompt is a task item we can check
+        out["note"] = "Answers come from the same prompt. The task checker scores new items in the result, not this question."
+    return out

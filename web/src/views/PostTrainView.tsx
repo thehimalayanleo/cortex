@@ -1,7 +1,8 @@
 /**
- * The post-training lab, in three steps: choose, run, result. The job trains the model, tests it on new items with
- * the task's checker, tests that it still refuses harmful requests, and then says if you can use it.
- * UI text is ASD-STE100 style: short sentences, simple words.
+ * Post-train: a guided page for someone who has never post-trained a model. One line says what it is; a quick
+ * start runs a complete example; three plain choices (skill, model, method) start a job; the job trains, tests on
+ * new items with the skill's checker, tests that refusal holds, and says if the model got better. "Try it" asks the
+ * same question to the model before and after training. UI text is ASD-STE100 style.
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -11,11 +12,17 @@ import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
 
 const pct = (v?: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
-const TASK_TEXT: Record<string, string> = { arm: "The arm simulator checks each plan.", gsm8k: "The checker compares the final number." };
-const METHOD_TEXT: Record<string, string> = { sft: "Learn from correct answers.", grpo: "Try answers. Keep the answers that the checker likes." };
+const SKILL: Record<string, { title: string; line: string; check: string; example: string }> = {
+  gsm8k: { title: "Math", line: "Solve short word problems.", check: "the final number", example: "A shop sells 3 pens for $2. How much do 12 pens cost?" },
+  arm: { title: "Robot arm plans", line: "Write a plan that moves blocks on a table.", check: "the arm simulator", example: "Put the red block in the bin." },
+};
+const METHOD: Record<string, { title: string; line: string }> = {
+  sft: { title: "Show it answers", line: "SFT. The model copies correct answers. Start here." },
+  grpo: { title: "Let it try", line: "GRPO. The model tries; the checker scores each try. Use after SFT." },
+};
 
-type Check = { base: { task_score: number; refusal: number }; tuned: { task_score: number; refusal: number }; ok: boolean; why: string };
-
+type Score = { task_score: number; refusal: number; over_refusal?: number };
+type Check = { base: Score; tuned: Score; ok: boolean; why: string };
 function checks(j: PtJob): Check | null {
   const r = j.result as Record<string, any> | null;
   if (!r || !r.base || !r.tuned) return null;
@@ -23,13 +30,35 @@ function checks(j: PtJob): Check | null {
   const base = arm ? { task_score: r.base.plan_success, refusal: r.base.advbench_refusal } : r.base;
   const tuned = arm ? { task_score: r.tuned.plan_success, refusal: r.tuned.advbench_refusal } : r.tuned;
   const better = tuned.task_score > base.task_score, safe = tuned.refusal >= base.refusal - 0.1;
-  const why = !better ? "The task score did not increase." : !safe ? "The model refuses fewer harmful requests." : "The task score increased. The model still refuses harmful requests.";
-  return { base, tuned, ok: better && safe, why };
+  const overUp = (tuned.over_refusal ?? 0) > (base.over_refusal ?? 0) + 0.1;
+  // the lab's own verdict (lab/recipes/mlx_post.py) decides; this only words it
+  const ok = r.verdict ? !!r.verdict.promote : better && safe && !overUp;
+  const why = !better ? "The skill score did not increase." : !safe ? "The model now refuses fewer harmful requests."
+    : overUp ? "The model now refuses normal tasks too. It learned to say no to everything." : "The skill score increased, and the model still refuses harmful requests.";
+  return { base, tuned, ok, why };
+}
+const stage = (j: PtJob) => (j.status === "done" ? 2 : j.log.some((l) => l.includes('"phase": "eval"')) ? 1 : 0);
+
+function Curve({ pts }: { pts: number[] }) {
+  if (pts.length < 2) return <div className="pt-curve muted small">The loss curve shows here when training starts.</div>;
+  const lo = Math.min(...pts), hi = Math.max(...pts), W = 560, H = 90;
+  const d = pts.map((v, i) => `${i ? "L" : "M"}${(i / (pts.length - 1)) * W},${H - ((v - lo) / (hi - lo || 1)) * (H - 6) - 3}`).join(" ");
+  return (
+    <div className="pt-curve">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"><path d={d} fill="none" stroke="var(--accent)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" /></svg>
+      <span className="muted small mono">loss {pts[0].toFixed(2)} → {pts[pts.length - 1].toFixed(2)} (lower is better)</span>
+    </div>
+  );
 }
 
-function stage(j: PtJob): number {  // 0 train, 1 test, 2 done
-  if (j.status === "done") return 2;
-  return j.log.some((l) => l.includes('"phase": "eval"')) ? 1 : 0;
+function Option({ on, disabled, onClick, title, line, foot }: { on: boolean; disabled?: boolean; onClick: () => void; title: string; line: string; foot?: string }) {
+  return (
+    <button className={`pt-opt${on ? " on" : ""}`} disabled={disabled} onClick={onClick}>
+      <b>{title}</b>
+      <span className="small">{line}</span>
+      {foot && <span className="muted small">{foot}</span>}
+    </button>
+  );
 }
 
 export function PostTrainView({ refresh }: { refresh: number }) {
@@ -43,6 +72,9 @@ export function PostTrainView({ refresh }: { refresh: number }) {
   const [safety, setSafety] = useState(true);
   const [sel, setSel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
+  const [tryOut, setTryOut] = useState<{ before: string; after: string } | null>(null);
+  const [trying, setTrying] = useState(false);
 
   const load = useCallback(() => api.post.overview().then((o) => { setOv(o); setErr(null); }).catch((e) => setErr(errorMessage(e))), []);
   useEffect(() => { void load(); }, [load, refresh]);
@@ -52,104 +84,135 @@ export function PostTrainView({ refresh }: { refresh: number }) {
     const t = window.setInterval(() => void load(), 3000);
     return () => window.clearInterval(t);
   }, [running, load]);
+  useEffect(() => { setQ(SKILL[task]?.example ?? ""); setTryOut(null); }, [task, sel]);
 
   if (err) return <EmptyState title="The lab is not available" hint={err} />;
   if (!ov) return <EmptyState title="Loading the lab" />;
-  const m = ov.models.find((x) => x.id === model);
-  const mac = m?.engine === "mlx";
-  const fits = !mac || !!m?.fits?.[method];
-  const allowed = mac || (task === "arm" && method === "sft");
   const job = ov.jobs.find((j) => j.id === sel) ?? ov.jobs[0];
   const c = job ? checks(job) : null;
+  const where = (m: PtOverview["models"][number]) => m.engine !== "mlx" ? "on the 5090" : m.fits?.[method] ? `on this Mac · ~${m.estimate_gb?.[method]} GB` : "too big for this Mac";
+  const usable = (m: PtOverview["models"][number]) => m.engine === "mlx" ? !!m.fits?.[method] : task === "arm" && method === "sft";
+  const cur = ov.models.find((m) => m.id === model);
 
-  const start = () => {
+  const start = (o?: { task: string; method: string; model: string; iters: number }) => {
     setBusy(true);
-    api.post.start({ task, method, model, iters, safety }).then((j) => { setSel(j.id); toast("The job started"); return load(); })
+    api.post.start({ task: o?.task ?? task, method: o?.method ?? method, model: o?.model ?? model, iters: o?.iters ?? iters, safety })
+      .then((j) => { setSel(j.id); toast("Training started"); return load(); })
       .catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false));
+  };
+  const ask = () => {
+    if (!job || !q.trim()) return;
+    setTrying(true);
+    api.post.try(job.id, q).then(setTryOut).catch((e) => toast(errorMessage(e), "error")).finally(() => setTrying(false));
   };
 
   return (
-    <div className="arm pt">
-      <div className="pt-top">
-        <div className="arm-card pt-choose">
-          <div className="pt-step"><span className="pt-n">1</span><b>Task</b></div>
-          <div className="seg">{ov.tasks.map((t) => <button key={t.id} className={`btn${task === t.id ? " primary" : ""}`} onClick={() => setTask(t.id)}>{t.label}</button>)}</div>
-          <div className="muted small">{TASK_TEXT[task]}</div>
+    <div className="pt2">
+      <header className="pt2-head">
+        <h2>Post-train a model</h2>
+        <p className="muted">Post-training teaches a model one more skill. The lab trains the model, tests it on new questions, and tells you if it got better.</p>
+        <div className="row">
+          <button className="btn primary" disabled={busy} onClick={() => { const o = { task: "arm", method: "sft", model: "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16", iters: 75 }; setTask(o.task); setMethod(o.method); setModel(o.model); start(o); }}>
+            Quick start: teach a 4B NVIDIA model to plan robot-arm moves
+          </button>
+          <span className="muted small">Runs on the 5090. About 10 minutes.</span>
+        </div>
+        <div className="muted small">The small models on this Mac are good for learning the steps. They are too small to learn a skill well and stay safe.</div>
+      </header>
 
-          <div className="pt-step"><span className="pt-n">2</span><b>Method</b></div>
-          <div className="seg">{ov.methods.map((x) => <button key={x.id} className={`btn${method === x.id ? " primary" : ""}`} onClick={() => setMethod(x.id)}>{x.label}</button>)}</div>
-          <div className="muted small">{METHOD_TEXT[method]}</div>
+      <section className="pt2-step">
+        <h3><span className="pt-n">1</span> What should it learn?</h3>
+        <div className="pt-opts">
+          {["gsm8k", "arm"].map((t) => <Option key={t} on={task === t} onClick={() => setTask(t)} title={SKILL[t].title} line={SKILL[t].line} foot={`Checked by ${SKILL[t].check}`} />)}
+        </div>
+      </section>
 
-          <div className="pt-step"><span className="pt-n">3</span><b>Model</b></div>
-          <select className="select" value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
-            {ov.models.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-          </select>
-          <div className={`small ${fits ? "muted" : "pt-bad"}`}>
-            {!mac ? "Runs on the 5090." : fits ? "Runs on this Mac." : "Too big for this Mac. Select a smaller model."}
-          </div>
+      <section className="pt2-step">
+        <h3><span className="pt-n">2</span> Which model?</h3>
+        <div className="pt-opts">
+          {ov.models.map((m) => <Option key={m.id} on={model === m.id} disabled={!usable(m)} onClick={() => setModel(m.id)} title={m.label} line={where(m)} />)}
+        </div>
+      </section>
 
-          <button className="btn primary pt-go" disabled={busy || !fits || !allowed} onClick={start}>{busy ? "Starting…" : "Start"}</button>
-          {!allowed && <div className="muted small">The 5090 can only do arm planning with SFT at this time.</div>}
+      <section className="pt2-step">
+        <h3><span className="pt-n">3</span> How should it learn?</h3>
+        <div className="pt-opts">
+          {["sft", "grpo"].map((x) => <Option key={x} on={method === x} onClick={() => setMethod(x)} title={METHOD[x].title} line={METHOD[x].line} />)}
+        </div>
+        <div className="row">
+          <button className="btn primary" disabled={busy || !cur || !usable(cur)} onClick={() => start()}>{busy ? "Starting…" : "Start training"}</button>
           <details className="pt-more">
-            <summary className="muted small">More</summary>
+            <summary className="muted small">Settings</summary>
             <label className="small">Steps <input className="input sm arm-seed" type="number" min={4} value={iters} onChange={(e) => setIters(Number(e.target.value) || 20)} /></label>
-            {task === "arm" && <label className="small arm-check"><input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> Teach the model to refuse unsafe arm requests</label>}
-            {mac && <div className="muted small">Memory: about {m?.estimate_gb?.[method]} GB. Limit: {ov.cap_gb} GB.</div>}
+            {task === "arm" && <label className="small arm-check"><input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> Also teach it to refuse unsafe arm requests</label>}
           </details>
         </div>
+      </section>
 
-        <div className="arm-card pt-result">
-          {!job ? <div className="muted">Select a task, a method and a model. Then push Start.</div> : (
+      {job && (
+        <section className="pt2-step pt2-run">
+          <div className="row">
+            <h3>{SKILL[job.task]?.title ?? job.task} · {METHOD[job.method]?.title ?? job.method} · {job.model.split("/").pop()}</h3>
+            <span className="grow" />
+            <button className="lnk small" onClick={() => navigate({ kind: "lab", run: job.run })}>log</button>
+          </div>
+          <div className="pt-flow">
+            {["1 Train", "2 Test on new questions", "3 Decide"].map((s, i) => {
+              const at = job.status === "failed" ? -1 : stage(job);
+              return <span key={s} className={`pt-flow-s ${at > i || (at === 2 && i === 2) ? "done" : at === i ? "now" : ""}`}>{s}</span>;
+            })}
+          </div>
+          <Curve pts={job.metrics.filter((x) => x.loss != null).map((x) => x.loss!)} />
+          {job.status === "failed" && <div className="pt-bad">The job failed. Open the log.</div>}
+          {c ? (
             <>
-              <div className="row">
-                <b>{ov.tasks.find((t) => t.id === job.task)?.label} · {job.method.toUpperCase()} · {job.model.split("/").pop()}</b>
-                <span className="grow" />
-                <button className="lnk" onClick={() => navigate({ kind: "lab", run: job.run })}>log</button>
+              <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{c.ok ? "Better. You can use this model." : "Not better. Do not use this model."}</div>
+              <div className="small">{c.why}</div>
+              <div className="pt-nums">
+                <div><div className="muted small">Skill score on new questions</div><div className="big">{pct(c.base.task_score)} → {pct(c.tuned.task_score)}</div></div>
+                <div><div className="muted small">Refuses harmful requests</div><div className="big">{pct(c.base.refusal)} → {pct(c.tuned.refusal)}</div></div>
               </div>
-              <div className="pt-flow">
-                {["Train", "Test", "Decide"].map((s, i) => {
-                  const at = job.status === "failed" ? -1 : stage(job);
-                  return <span key={s} className={`pt-flow-s ${at > i || (at === 2 && i === 2) ? "done" : at === i ? "now" : ""}`}>{s}</span>;
-                })}
-              </div>
-              {job.status === "failed" && <div className="pt-bad">The job failed. Open the log.</div>}
-              {c ? (
-                <>
-                  <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{c.ok ? "You can use this model." : "Do not use this model."}</div>
-                  <div className="small">{c.why}</div>
-                  <div className="pt-nums">
-                    <div><div className="muted small">Task score</div><div className="big">{pct(c.base.task_score)} → {pct(c.tuned.task_score)}</div></div>
-                    <div><div className="muted small">Refuses harmful requests</div><div className="big">{pct(c.base.refusal)} → {pct(c.tuned.refusal)}</div></div>
+              <div className="muted small">Left number: before training. Right number: after training.</div>
+              {job.where.includes("Mac") && (
+                <div className="pt-try">
+                  <b>Try it</b>
+                  <div className="row">
+                    <input className="input" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") ask(); }} />
+                    <button className="btn sm primary" disabled={trying} onClick={ask}>{trying ? "Asking…" : "Ask both"}</button>
                   </div>
-                  <div className="muted small">Left: the model before training. Right: the model after training. Both use new items that the model did not see.</div>
-                </>
-              ) : job.status !== "failed" && <div className="muted small">{stage(job) === 0 ? "The model is training." : "The lab is testing the model."}</div>}
+                  {tryOut && (
+                    <div className="pt-cmp">
+                      <div><div className="muted small">Before training</div><pre>{tryOut.before}</pre></div>
+                      <div><div className="muted small">After training</div><pre>{tryOut.after}</pre></div>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
-          )}
-        </div>
-      </div>
+          ) : job.status !== "failed" && <div className="muted small">{stage(job) === 0 ? "The model is training." : "The lab is testing the model on new questions."}</div>}
+        </section>
+      )}
 
-      {ov.jobs.length > 0 && (
-        <div className="arm-card">
-          <b>Earlier jobs</b>
+      {ov.jobs.length > 1 && (
+        <details className="pt2-step">
+          <summary className="muted small">Earlier jobs ({ov.jobs.length})</summary>
           <table className="arm-grid pt-jobs">
-            <thead><tr><th>when</th><th>task</th><th>model</th><th>task score</th><th>result</th></tr></thead>
             <tbody>
               {ov.jobs.map((j) => {
                 const cc = checks(j);
                 return (
                   <tr key={j.id} className={j.id === job?.id ? "sel" : ""} onClick={() => setSel(j.id)}>
                     <td className="mono">{j.started.replace("T", " ").slice(5, 16)}</td>
-                    <td>{j.task} · {j.method}</td>
+                    <td>{SKILL[j.task]?.title ?? j.task} · {j.method}</td>
                     <td className="mono">{j.model.split("/").pop()}</td>
-                    <td>{cc ? `${pct(cc.base.task_score)} → ${pct(cc.tuned.task_score)}` : "–"}</td>
-                    <td className={cc ? (cc.ok ? "ok" : "bad") : ""}>{cc ? (cc.ok ? "use" : "do not use") : j.status}</td>
+                    <td>{cc ? `${pct(cc.base.task_score)} → ${pct(cc.tuned.task_score)}` : j.status}</td>
+                    <td className={cc ? (cc.ok ? "ok" : "bad") : ""}>{cc ? (cc.ok ? "better" : "not better") : ""}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
+        </details>
       )}
     </div>
   );

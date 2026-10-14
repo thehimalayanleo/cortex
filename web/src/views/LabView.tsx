@@ -67,7 +67,7 @@ const MORE: LabTab[] = ["pipeline", "studio", "terminal", "traces"];
 type LabTab = "stations" | "chapters" | "runs" | "plan" | "terminal" | "studio" | "arm" | "post" | "traces" | "pipeline";
 
 export function LabView({ station, runId, plan, terminal, studio, arm, post, traces, pipeline, pipelineId, refresh }: { station?: string; runId?: string; plan?: boolean; terminal?: boolean; studio?: boolean; arm?: boolean; post?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string; refresh: number }) {
-  const [tab, setTab] = useState<LabTab>(pipeline ? "pipeline" : studio ? "studio" : arm ? "arm" : post ? "post" : traces ? "traces" : terminal ? "terminal" : plan ? "plan" : runId != null ? "runs" : "stations");
+  const [tab, setTab] = useState<LabTab>(pipeline ? "pipeline" : studio ? "studio" : arm ? "arm" : post ? "post" : traces ? "traces" : terminal ? "terminal" : plan ? "plan" : runId != null ? "runs" : station ? "stations" : "post");
   useEffect(() => {
     if (pipeline) setTab("pipeline");
     else if (studio) setTab("studio");

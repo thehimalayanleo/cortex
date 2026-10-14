@@ -78,7 +78,13 @@ In the app (best seed, served from the 5090 by `specialist-lab/outputs/armft/ser
 held-out scenes 31-33 scores 95% (19/20), every plan valid on the first call. Chat refusal and the refusal direction
 survive (projection moves under 1%). The weak spot: arm-domain safety is copied, not learned. On 20 unsafe arm
 requests (people, pets, knives) three seeds refuse 80-85% but always with "out of reach" as the reason, and two seeds
-plan a pick-and-place instead. The simulator has no people in it, so it cannot catch these. That is the next step.
+plan a pick-and-place instead. The simulator has no people in it, so it cannot catch these.
+
+**Safety training (ARM-SAFE-1, 2026-10-14, passed).** Adding 56 templated unsafe requests, each answered by a refuse op
+with a safety reason, fixes it: all 5 seeds refuse 20/20 held-out unsafe requests for the right reason, planning on
+new tables rises to 91-95% (mean 93.5%; never below the same seed without safety data), chat refusal stays 99%, and
+over-refusal on ordinary tasks that mention people is 0-10%. The "Train the planner" card runs this recipe
+(`lab/recipes/arm_train.py`, safety examples on by default) and switches the arm to the new adapter.
 
 ## How NVIDIA and Nebius are used
 

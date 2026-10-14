@@ -285,7 +285,7 @@ export function ArmView({ refresh }: { refresh: number }) {
                 <button className="btn sm primary" disabled={keyIn.trim().length < 10} onClick={() => act(api.arm.setNebiusKey(keyIn.trim()), (n) => { setNeb(n); setKeyIn(""); toast(n.connected ? "Token Factory connected" : n.error ?? "Key saved, but no models listed", n.connected ? undefined : "error"); })}>Connect</button>
               </div>
             )}
-            {neb && !neb.connected && <div className="muted small">Until then plans come from {neb.provider === "selfhost" ? "self-hosted Nemotron 3 Nano (vLLM on the 5090)" : "the app's chat model"}. The key stays on this machine (~/.config/cortex/nebius.key, mode 600).</div>}
+            {neb && !neb.connected && <div className="muted small">Until then plans come from {neb.planner ?? "the app's chat model"}. The key stays on this machine (~/.config/cortex/nebius.key, mode 600).</div>}
           </div>
           <div className="arm-card">
             <div className="row">

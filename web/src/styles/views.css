@@ -857,7 +857,7 @@
 .arm .verdict.bad{color:#d0453f;border-color:#d0453f}
 .arm .verdict.warn{color:#c9962b;border-color:#c9962b}
 .arm .seg{display:flex;gap:4px}
-.arm-seed{width:64px;flex:0 0 auto;min-width:0!important}
+.arm-card .input.arm-seed{width:64px;flex:0 0 64px;min-width:0}
 .arm-check{display:flex;align-items:center;gap:4px}
 .arm-attempts{display:flex;flex-direction:column;gap:3px}
 .arm-attempts .att{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-left:3px solid var(--line);border-radius:6px;padding:3px 8px;background:var(--bg)}

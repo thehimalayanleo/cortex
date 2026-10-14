@@ -22,7 +22,7 @@ from pathlib import Path
 
 import arm_world as W
 
-MODEL = "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16"
+MODEL = os.environ.get("ARMFT_MODEL", "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16")
 OUT = Path(os.environ.get("ARMFT_OUT", Path(__file__).resolve().parent / "results")).expanduser()
 ADV = "https://raw.githubusercontent.com/llm-attacks/llm-attacks/main/data/advbench/harmful_behaviors.csv"
 TRAIN_SEEDS, TEST_SEEDS = range(1, 31), range(31, 41)
@@ -136,7 +136,8 @@ def load(adapter=None):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tok = AutoTokenizer.from_pretrained(MODEL)
-    model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.bfloat16, device_map={"": 0})
+    kw = {} if "nemotron" in MODEL.lower() else {"attn_implementation": "eager"}  # 5090 SDPA gradient bug (memory)
+    model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.bfloat16, device_map={"": 0}, **kw)
     if adapter:
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter)
@@ -260,8 +261,9 @@ def run(a):
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
     model.config.use_cache = False
-    model = get_peft_model(model, LoraConfig(r=32, lora_alpha=64, lora_dropout=0.0, task_type="CAUSAL_LM",
-                                             target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "in_proj", "up_proj", "down_proj"]))
+    targets = (["q_proj", "k_proj", "v_proj", "o_proj", "in_proj", "up_proj", "down_proj"] if "nemotron" in MODEL.lower()
+               else ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+    model = get_peft_model(model, LoraConfig(r=32, lora_alpha=64, lora_dropout=0.0, task_type="CAUSAL_LM", target_modules=targets))
     inner, head = model.base_model.model.model, model.base_model.model.lm_head
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=a.lr)
     steps = min(a.max_steps, len(data) // a.accum) if a.max_steps else len(data) // a.accum
@@ -287,7 +289,13 @@ def run(a):
     adir = OUT / f"adapter_{a.seed}_{a.tag}"
     model.save_pretrained(adir)
     model.config.use_cache = True
-    res = evaluate(tok, model, f"seed{a.seed}", torch.load(OUT / "direction.pt"))
+    if a.merge_out:  # dense post-trained weights for pruning (PRUNE-1)
+        merged = model.merge_and_unload()
+        merged.save_pretrained(a.merge_out)
+        tok.save_pretrained(a.merge_out)
+        model = merged
+    dfile = OUT / "direction.pt"
+    res = evaluate(tok, model, f"seed{a.seed}", torch.load(dfile) if dfile.exists() and not a.no_direction else None)
     res.update(seed=a.seed, steps=steps, examples=len(rows), dropped=len(train) - len(rows), safety=bool(a.safety), loss=losses, train_seconds=round(time.time() - t0))
     (OUT / f"run_{a.seed}_{a.tag}.json").write_text(json.dumps(res, indent=1))
     print(json.dumps({k: v for k, v in res.items() if k not in ("plan", "adv_samples", "unsafe_samples", "loss")}, indent=1))
@@ -340,5 +348,7 @@ if __name__ == "__main__":
     ap.add_argument("--max-steps", type=int, default=0)
     ap.add_argument("--tag", default="full")
     ap.add_argument("--safety", action="store_true")
+    ap.add_argument("--merge-out", default="")
+    ap.add_argument("--no-direction", action="store_true")
     a = ap.parse_args()
     {"stats": stats, "base": base, "run": run, "score": score, "score_safe": score_safe}[a.cmd](a)

@@ -21,12 +21,19 @@ def _load_key() -> str:
     k = os.environ.get("CORTEX_API_KEY") or os.environ.get("OPENCODE_API_KEY")
     if k:
         return k
-    p = Path("~/.local/share/opencode/auth.json").expanduser()
-    if p.exists():
-        try:
-            return json.loads(p.read_text())["opencode-go"]["key"]
-        except Exception:
-            pass
+    kf = Path("~/.config/cortex/opencode.key").expanduser()  # written by the user, mode 600
+    if kf.exists():
+        return kf.read_text().strip()
+    # the CLI's auth file; ~/.local/share/opencode-cli is the CLI's own data dir when the desktop app owns the default one
+    for p in (Path("~/.local/share/opencode/auth.json").expanduser(), Path("~/.local/share/opencode-cli/opencode/auth.json").expanduser()):
+        if p.exists():
+            try:
+                d = json.loads(p.read_text())
+                for name in ("opencode-go", "opencode"):
+                    if d.get(name, {}).get("key"):
+                        return d[name]["key"]
+            except Exception:
+                pass
     return ""
 
 

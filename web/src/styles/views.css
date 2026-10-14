@@ -879,14 +879,32 @@
 .arm-grid td.bad{color:#e07a74}
 @media (max-width:1500px){.arm-top,.arm-bottom{grid-template-columns:1fr}.arm-stage{min-height:420px}}
 @media (max-width:900px){.arm-bench{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.pt-top{display:grid;grid-template-columns:minmax(380px,2fr) minmax(0,3fr);gap:12px}
-.pt-grid{display:grid;grid-template-columns:72px 1fr;gap:8px 12px;align-items:center}
-.pt-grid .select{max-width:420px}
+.pt-top{display:grid;grid-template-columns:minmax(340px,1fr) minmax(0,1.6fr);gap:12px}
+.pt-choose{gap:10px}
+.pt-step{display:flex;align-items:center;gap:8px;margin-top:4px}
+.pt-n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--accent);color:var(--accent-text);font:600 12px var(--mono)}
+.pt-go{align-self:flex-start;margin-top:8px;padding:6px 22px}
+.pt-more{display:flex;flex-direction:column;gap:6px}
+.pt-more[open]{gap:8px}
+.pt-more label{display:flex;align-items:center;gap:8px}
 .pt-bad{color:#e07a74}
-.pt-detail{min-height:260px}
-.pt-spark{display:flex;align-items:center;gap:10px}
-.pt-table{width:100%}
+.pt-result{min-height:300px;gap:12px}
+.pt-flow{display:flex;gap:0;align-items:center}
+.pt-flow-s{flex:1;text-align:center;padding:6px 0;border:1px solid var(--line);color:var(--muted);font:12px var(--mono)}
+.pt-flow-s+.pt-flow-s{border-left:none}
+.pt-flow-s:first-child{border-radius:8px 0 0 8px}
+.pt-flow-s:last-child{border-radius:0 8px 8px 0}
+.pt-flow-s.now{color:var(--ink);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.pt-flow-s.done{color:var(--accent-text)}
+.pt-verdict{font:600 22px var(--sans)}
+.pt-verdict.ok{color:var(--accent-text)}
+.pt-verdict.bad{color:#e07a74}
+.pt-nums{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pt-nums>div{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--bg)}
+.pt-nums .big{font:600 24px var(--mono)}
 .pt-jobs{width:100%}
 .pt-jobs tbody tr{cursor:pointer}
 .pt-jobs tbody tr.sel td{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.pt-jobs td.ok{color:var(--accent-text)}
+.pt-jobs td.bad{color:#e07a74}
 @media (max-width:1200px){.pt-top{grid-template-columns:1fr}}

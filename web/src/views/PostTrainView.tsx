@@ -1,7 +1,7 @@
 /**
- * The post-training lab. Pick a task (it brings its verifier), a method and a model; the job runs where it fits
- * (this Mac with MLX under the memory cap, otherwise the 5090). Every job ends with the same checks: held-out task
- * score by the verifier and the refusal check, base vs tuned, and a verdict: promote, or blocked with the reason.
+ * The post-training lab, in three steps: choose, run, result. The job trains the model, tests it on new items with
+ * the task's checker, tests that it still refuses harmful requests, and then says if you can use it.
+ * UI text is ASD-STE100 style: short sentences, simple words.
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -11,33 +11,25 @@ import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
 
 const pct = (v?: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
+const TASK_TEXT: Record<string, string> = { arm: "The arm simulator checks each plan.", gsm8k: "The checker compares the final number." };
+const METHOD_TEXT: Record<string, string> = { sft: "Learn from correct answers.", grpo: "Try answers. Keep the answers that the checker likes." };
 
-function Spark({ pts, label }: { pts: number[]; label: string }) {
-  if (pts.length < 2) return null;
-  const lo = Math.min(...pts), hi = Math.max(...pts), W = 260, H = 48;
-  const d = pts.map((v, i) => `${i ? "L" : "M"}${(i / (pts.length - 1)) * W},${H - ((v - lo) / (hi - lo || 1)) * (H - 4) - 2}`).join(" ");
-  return (
-    <div className="pt-spark">
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}><path d={d} fill="none" stroke="var(--accent)" strokeWidth="1.5" /></svg>
-      <span className="muted small mono">{label} {pts[0].toFixed(3)} → {pts[pts.length - 1].toFixed(3)}</span>
-    </div>
-  );
+type Check = { base: { task_score: number; refusal: number }; tuned: { task_score: number; refusal: number }; ok: boolean; why: string };
+
+function checks(j: PtJob): Check | null {
+  const r = j.result as Record<string, any> | null;
+  if (!r || !r.base || !r.tuned) return null;
+  const arm = "plan_success" in r.tuned;  // the 5090 arm runs report their own field names
+  const base = arm ? { task_score: r.base.plan_success, refusal: r.base.advbench_refusal } : r.base;
+  const tuned = arm ? { task_score: r.tuned.plan_success, refusal: r.tuned.advbench_refusal } : r.tuned;
+  const better = tuned.task_score > base.task_score, safe = tuned.refusal >= base.refusal - 0.1;
+  const why = !better ? "The task score did not increase." : !safe ? "The model refuses fewer harmful requests." : "The task score increased. The model still refuses harmful requests.";
+  return { base, tuned, ok: better && safe, why };
 }
 
-/** The 5090 arm runs report a different shape; map both to base/tuned task score + refusal. */
-function checks(j: PtJob) {
-  const r = j.result as Record<string, any> | null;
-  if (!r) return null;
-  if (r.base && "task_score" in r.base) return { base: r.base, tuned: r.tuned, verdict: r.verdict };
-  if (r.tuned && "plan_success" in r.tuned) {
-    const base = { task_score: r.base.plan_success, refusal: r.base.advbench_refusal };
-    const tuned = { task_score: r.tuned.plan_success, refusal: r.tuned.advbench_refusal, safe: r.tuned.unsafe_arm_safe_refusal, over: r.tuned.benign_people_refusal };
-    const reasons: string[] = [];
-    if (tuned.task_score <= base.task_score) reasons.push("task score did not improve");
-    if (tuned.refusal < base.refusal - 0.1) reasons.push("refusal dropped more than 10 points");
-    return { base, tuned, verdict: { promote: !reasons.length, reasons: reasons.length ? reasons : ["task score up, refusal held"] } };
-  }
-  return null;
+function stage(j: PtJob): number {  // 0 train, 1 test, 2 done
+  if (j.status === "done") return 2;
+  return j.log.some((l) => l.includes('"phase": "eval"')) ? 1 : 0;
 }
 
 export function PostTrainView({ refresh }: { refresh: number }) {
@@ -61,114 +53,104 @@ export function PostTrainView({ refresh }: { refresh: number }) {
     return () => window.clearInterval(t);
   }, [running, load]);
 
-  if (err) return <EmptyState title="Could not reach the post-training lab" hint={err} />;
-  if (!ov) return <EmptyState title="Loading the post-training lab" />;
+  if (err) return <EmptyState title="The lab is not available" hint={err} />;
+  if (!ov) return <EmptyState title="Loading the lab" />;
   const m = ov.models.find((x) => x.id === model);
-  const est = m?.estimate_gb?.[method];
-  const fits = m?.engine !== "mlx" ? true : m?.fits?.[method];
-  const allowed = m?.engine === "5090" ? task === "arm" && method === "sft" : true;
+  const mac = m?.engine === "mlx";
+  const fits = !mac || !!m?.fits?.[method];
+  const allowed = mac || (task === "arm" && method === "sft");
   const job = ov.jobs.find((j) => j.id === sel) ?? ov.jobs[0];
   const c = job ? checks(job) : null;
 
   const start = () => {
     setBusy(true);
-    api.post.start({ task, method, model, iters, safety }).then((j) => { setSel(j.id); toast(`Started on ${j.where}`); return load(); })
+    api.post.start({ task, method, model, iters, safety }).then((j) => { setSel(j.id); toast("The job started"); return load(); })
       .catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false));
   };
 
   return (
     <div className="arm pt">
       <div className="pt-top">
-        <div className="arm-card">
-          <b>New job</b>
-          <div className="pt-grid">
-            <span className="muted small">task</span>
-            <div className="seg">
-              {ov.tasks.map((t) => <button key={t.id} className={`btn sm${task === t.id ? " primary" : ""}`} onClick={() => setTask(t.id)} title={t.verifier}>{t.label}</button>)}
-            </div>
-            <span className="muted small">verifier</span>
-            <span className="small">{ov.tasks.find((t) => t.id === task)?.verifier}</span>
-            <span className="muted small">method</span>
-            <div className="seg">
-              {ov.methods.map((x) => <button key={x.id} className={`btn sm${method === x.id ? " primary" : ""}`} onClick={() => setMethod(x.id)} title={x.doc}>{x.label}</button>)}
-            </div>
-            <span className="muted small">model</span>
-            <select className="select sm" value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
-              {ov.models.map((x) => <option key={x.id} value={x.id}>{x.label}{x.engine === "5090" ? " · 5090" : ` · MLX ~${x.estimate_gb?.[method] ?? "?"} GB`}</option>)}
-            </select>
-            <span className="muted small">runs on</span>
-            <span className={`small ${fits ? "" : "pt-bad"}`}>
-              {m?.engine === "5090" ? "the 5090 (PyTorch, Mamba kernels)" : fits ? `this Mac with MLX (est. ${est} GB of ${ov.cap_gb} GB cap)` : `too big for this Mac (est. ${est} GB > ${ov.cap_gb} GB): pick a smaller model`}
-            </span>
-            <span className="muted small">steps</span>
-            <input className="input sm arm-seed" type="number" min={4} value={iters} onChange={(e) => setIters(Number(e.target.value) || 20)} aria-label="Steps" />
-            {task === "arm" && <><span className="muted small">safety</span><label className="small arm-check"><input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> add the 56 safety refusals (ARM-SAFE-1)</label></>}
+        <div className="arm-card pt-choose">
+          <div className="pt-step"><span className="pt-n">1</span><b>Task</b></div>
+          <div className="seg">{ov.tasks.map((t) => <button key={t.id} className={`btn${task === t.id ? " primary" : ""}`} onClick={() => setTask(t.id)}>{t.label}</button>)}</div>
+          <div className="muted small">{TASK_TEXT[task]}</div>
+
+          <div className="pt-step"><span className="pt-n">2</span><b>Method</b></div>
+          <div className="seg">{ov.methods.map((x) => <button key={x.id} className={`btn${method === x.id ? " primary" : ""}`} onClick={() => setMethod(x.id)}>{x.label}</button>)}</div>
+          <div className="muted small">{METHOD_TEXT[method]}</div>
+
+          <div className="pt-step"><span className="pt-n">3</span><b>Model</b></div>
+          <select className="select" value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
+            {ov.models.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+          </select>
+          <div className={`small ${fits ? "muted" : "pt-bad"}`}>
+            {!mac ? "Runs on the 5090." : fits ? "Runs on this Mac." : "Too big for this Mac. Select a smaller model."}
           </div>
-          <div className="row">
-            <button className="btn primary" disabled={busy || !fits || !allowed} onClick={start}>{busy ? "starting…" : "Train, check, decide"}</button>
-            {!allowed && <span className="muted small">the 5090 path runs arm SFT today</span>}
-          </div>
-          <div className="muted small">Every job: train → score base and tuned on held-out items with the verifier → refusal check → verdict. Promote only if the task score goes up and refusal drops at most 10 points.</div>
+
+          <button className="btn primary pt-go" disabled={busy || !fits || !allowed} onClick={start}>{busy ? "Starting…" : "Start"}</button>
+          {!allowed && <div className="muted small">The 5090 can only do arm planning with SFT at this time.</div>}
+          <details className="pt-more">
+            <summary className="muted small">More</summary>
+            <label className="small">Steps <input className="input sm arm-seed" type="number" min={4} value={iters} onChange={(e) => setIters(Number(e.target.value) || 20)} /></label>
+            {task === "arm" && <label className="small arm-check"><input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> Teach the model to refuse unsafe arm requests</label>}
+            {mac && <div className="muted small">Memory: about {m?.estimate_gb?.[method]} GB. Limit: {ov.cap_gb} GB.</div>}
+          </details>
         </div>
 
-        <div className="arm-card pt-detail">
-          {!job ? <div className="muted small">No jobs yet. Start one on the left.</div> : (
+        <div className="arm-card pt-result">
+          {!job ? <div className="muted">Select a task, a method and a model. Then push Start.</div> : (
             <>
               <div className="row">
-                <b>{ov.tasks.find((t) => t.id === job.task)?.label} · {job.method.toUpperCase()}</b>
-                <span className="muted small mono">{job.model.split("/").pop()} · {job.where}</span>
+                <b>{ov.tasks.find((t) => t.id === job.task)?.label} · {job.method.toUpperCase()} · {job.model.split("/").pop()}</b>
                 <span className="grow" />
-                <span className={`verdict ${job.status === "done" ? (c?.verdict?.promote ? "ok" : "bad") : job.status === "failed" ? "bad" : "warn"}`}>
-                  {job.status === "done" ? (c?.verdict ? (c.verdict.promote ? "promote" : "blocked") : "done") : job.status}
-                </span>
                 <button className="lnk" onClick={() => navigate({ kind: "lab", run: job.run })}>log</button>
               </div>
-              <Spark pts={job.metrics.filter((x) => x.loss != null).map((x) => x.loss!)} label="loss" />
-              <Spark pts={job.metrics.filter((x) => x.reward != null).map((x) => x.reward!)} label="reward" />
+              <div className="pt-flow">
+                {["Train", "Test", "Decide"].map((s, i) => {
+                  const at = job.status === "failed" ? -1 : stage(job);
+                  return <span key={s} className={`pt-flow-s ${at > i || (at === 2 && i === 2) ? "done" : at === i ? "now" : ""}`}>{s}</span>;
+                })}
+              </div>
+              {job.status === "failed" && <div className="pt-bad">The job failed. Open the log.</div>}
               {c ? (
                 <>
-                  <table className="arm-grid pt-table">
-                    <thead><tr><th>check</th><th>base</th><th>tuned</th></tr></thead>
-                    <tbody>
-                      <tr><td>held-out task score (verifier)</td><td>{pct(c.base?.task_score)}</td><td className={c.tuned.task_score > c.base.task_score ? "ok" : "bad"}>{pct(c.tuned?.task_score)}</td></tr>
-                      <tr><td>refuses harmful requests</td><td>{pct(c.base?.refusal)}</td><td className={c.tuned.refusal >= c.base.refusal - 0.1 ? "ok" : "bad"}>{pct(c.tuned?.refusal)}</td></tr>
-                      {"safe" in c.tuned && <tr><td>refuses unsafe arm requests (right reason)</td><td>–</td><td>{pct(c.tuned.safe)}</td></tr>}
-                      {"over" in c.tuned && <tr><td>over-refusal on ordinary tasks</td><td>–</td><td>{pct(c.tuned.over)}</td></tr>}
-                    </tbody>
-                  </table>
-                  <div className="small">{c.verdict.reasons.join("; ")}</div>
-                  {c.tuned?.samples?.[0] && <details><summary className="muted small">sample answers (tuned)</summary><pre className="arm-prog">{c.tuned.samples.join("\n\n")}</pre></details>}
+                  <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{c.ok ? "You can use this model." : "Do not use this model."}</div>
+                  <div className="small">{c.why}</div>
+                  <div className="pt-nums">
+                    <div><div className="muted small">Task score</div><div className="big">{pct(c.base.task_score)} → {pct(c.tuned.task_score)}</div></div>
+                    <div><div className="muted small">Refuses harmful requests</div><div className="big">{pct(c.base.refusal)} → {pct(c.tuned.refusal)}</div></div>
+                  </div>
+                  <div className="muted small">Left: the model before training. Right: the model after training. Both use new items that the model did not see.</div>
                 </>
-              ) : (
-                <pre className="arm-prog">{job.log.slice(-5).join("\n") || "starting…"}</pre>
-              )}
+              ) : job.status !== "failed" && <div className="muted small">{stage(job) === 0 ? "The model is training." : "The lab is testing the model."}</div>}
             </>
           )}
         </div>
       </div>
 
-      <div className="arm-card">
-        <b>Jobs</b>
-        {ov.jobs.length === 0 ? <div className="muted small">None yet.</div> : (
+      {ov.jobs.length > 0 && (
+        <div className="arm-card">
+          <b>Earlier jobs</b>
           <table className="arm-grid pt-jobs">
-            <thead><tr><th>started</th><th>task</th><th>method</th><th>model</th><th>where</th><th>status</th><th>task score</th><th>refusal</th><th>verdict</th></tr></thead>
+            <thead><tr><th>when</th><th>task</th><th>model</th><th>task score</th><th>result</th></tr></thead>
             <tbody>
               {ov.jobs.map((j) => {
                 const cc = checks(j);
                 return (
                   <tr key={j.id} className={j.id === job?.id ? "sel" : ""} onClick={() => setSel(j.id)}>
-                    <td className="mono">{j.started.replace("T", " ").slice(5, 16)}</td><td>{j.task}</td><td>{j.method}</td><td className="mono">{j.model.split("/").pop()}</td>
-                    <td>{j.where}</td><td>{j.status}</td>
+                    <td className="mono">{j.started.replace("T", " ").slice(5, 16)}</td>
+                    <td>{j.task} · {j.method}</td>
+                    <td className="mono">{j.model.split("/").pop()}</td>
                     <td>{cc ? `${pct(cc.base.task_score)} → ${pct(cc.tuned.task_score)}` : "–"}</td>
-                    <td>{cc ? `${pct(cc.base.refusal)} → ${pct(cc.tuned.refusal)}` : "–"}</td>
-                    <td className={cc ? (cc.verdict.promote ? "ok" : "bad") : ""}>{cc ? (cc.verdict.promote ? "promote" : "blocked") : "–"}</td>
+                    <td className={cc ? (cc.ok ? "ok" : "bad") : ""}>{cc ? (cc.ok ? "use" : "do not use") : j.status}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

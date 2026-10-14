@@ -400,6 +400,8 @@ def nebius_status() -> dict[str, Any]:
 # Self-hosted Nemotron 3 Nano until a Token Factory key is set: vLLM on the 5090 over Tailscale by default, or the
 # Modal deployment (serve/nemotron_modal.py). One model; the deep tier is the same model with thinking on.
 SELFHOST = {
+    # ARM-FT-1's fine-tuned student (Nemotron 3 Nano 4B + LoRA on simulator-verified programs; best of 5 seeds, 0.95 held-out)
+    "student": {"url": "http://100.86.175.54:8002/v1", "model": "nemotron-3-nano-4b-arm-lora", "prompt": "student"},
     "5090": {"url": "http://100.86.175.54:8001/v1", "model": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4"},
     "modal": {"url": "https://ajinkyamulay123--cortex-nemotron-serve.modal.run/v1", "model": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8"},
 }
@@ -408,7 +410,7 @@ _self: dict[str, Any] = {"client": None, "host": None}
 
 
 def selfhost() -> tuple[str, dict[str, str]]:
-    host = os.environ.get("CORTEX_NEMOTRON_HOST", "5090")
+    host = os.environ.get("CORTEX_NEMOTRON_HOST", "student")
     return host, SELFHOST[host]
 
 
@@ -426,6 +428,8 @@ def planner_name() -> str:
         return f"{tier_model('fast')} → {tier_model('deep')} @ Nebius Token Factory"
     if pv == "selfhost":
         host, cfg = selfhost()
+        if cfg.get("prompt") == "student":
+            return f"{cfg['model']} @ 5090 (fine-tuned on simulator-verified programs)"
         return f"{cfg['model']} (thinking off → on) @ {host}, self-hosted vLLM"
     return "chat model (add a Nebius Token Factory key for Nemotron)"
 
@@ -455,7 +459,7 @@ def _llm(messages: list[dict[str, str]], tier: str = "fast") -> tuple[str, str]:
         txt = str(getattr(m, "reasoning_content", None) or getattr(m, "reasoning", None) or (m.model_extra or {}).get("reasoning_content") or "")
     if "</think>" in txt:
         txt = txt.split("</think>")[-1]
-    return (txt, model + (" +thinking" if pv == "selfhost" and tier == "deep" else ""))
+    return (txt, model + (" +thinking" if pv == "selfhost" and tier == "deep" and selfhost()[1].get("prompt") != "student" else ""))
 
 
 def _json(txt: str) -> dict[str, Any]:
@@ -485,6 +489,13 @@ Also declare what done looks like, so the simulator can check the program achiev
   {{"pred": "in", "obj": "<block>", "target": "bin"}}   {{"pred": "on", "obj": "<block>", "target": "<block>"}}   {{"pred": "at", "obj": "<block>", "xy": [x, y]}} (resting on the table, within 2 cm)
 Answer with JSON only: {{"goal": [...], "program": [...], "note": "one sentence"}}. When you refuse, the goal is []."""
 
+STUDENT_PROMPT = """You plan for a 6-joint desk robot arm. Frame: x forward, y left, z up, metres, base at the origin on the table. The gripper reaches about 0.15 to 0.38 m from the base.
+Scene:
+{scene}
+Ops: {{"op":"open"}} {{"op":"close"}} (grasps a block whose centre is within 2 cm of the tip) {{"op":"move","to":"<object>" or [x,y,z],"above":metres}} {{"op":"home"}} {{"op":"refuse","reason":"..."}}
+To grasp: open, move above the block, move down to its centre, close, lift. A released block falls onto what is below it. Refuse tasks that are out of reach or unsafe.
+Answer with JSON only: {{"goal":[...],"program":[...]}}. Goal items: {{"pred":"in","obj":"<block>","target":"bin"}} {{"pred":"on","obj":"<block>","target":"<block>"}} {{"pred":"at","obj":"<block>","xy":[x,y]}}. When refusing, the goal is []."""  # verbatim from ARM-FT-1 training (specialist-lab/outputs/armft/armft.py)
+
 JOINT_PROMPT = """You plan motions for a 6-joint SO-ARM101 desk robot arm by writing joint angles directly. Joint limits in degrees: {limits}.
 Zero for every joint is the arm pointing straight up; positive shoulder_lift leans the arm forward, positive elbow_flex bends the forearm further forward, wrist_flex likewise; shoulder_pan positive turns toward +y. Gripper 0 closed, 100 open; closing grasps a block within 2 cm of the tip.
 Link lengths (m): {links}. Frame: x forward, y left, z up, origin at the base on the table.
@@ -507,7 +518,8 @@ def _check(w: dict[str, Any], program: list[dict[str, Any]], start: dict[str, fl
 def plan_skills(instruction: str, w: dict[str, Any], start: dict[str, float], repairs: int = 2) -> dict[str, Any]:
     """Nemotron writes a program; the simulator checks it; errors go back for a rewrite. Attempt 1 and 2 use the fast
     tier, the last repair escalates to the deep tier."""
-    msgs = [{"role": "system", "content": SKILL_PROMPT.format(scene=W.describe(w))}, {"role": "user", "content": instruction}]
+    student = provider() == "selfhost" and selfhost()[1].get("prompt") == "student"
+    msgs = [{"role": "system", "content": (STUDENT_PROMPT if student else SKILL_PROMPT).format(scene=W.describe(w))}, {"role": "user", "content": instruction}]
     attempts: list[dict[str, Any]] = []
     chk: dict[str, Any] = {}
     for k in range(repairs + 1):

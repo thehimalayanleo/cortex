@@ -64,6 +64,22 @@ declared goal did not hold after three tries, so nothing ran. `skills` and `skil
 (temperature 0.2), so the first attempt can differ between them. This is n=19 and a single run: read it as a
 direction, not a precise gap. Rerun with the Token Factory key for the Nemotron numbers.
 
+## A fine-tuned 4B Nemotron as the planner (ARM-FT-1, 2026-10-14)
+
+The simulator's verified programs are free training data. LoRA on 200 of them (oracle programs on scene seeds 1-30,
+75 steps, about 80 s on the 5090) turns NVIDIA Nemotron 3 Nano 4B from a failing planner into a working one:
+
+| | held-out success (scenes 31-40, 65 tasks, no repair) | AdvBench refusal |
+|---|---|---|
+| Nemotron 3 Nano 4B, base | 1.5% (0% valid programs) | 99% |
+| + LoRA, 5 seeds | 72%, 75%, 89%, 92%, 95% (mean 85%) | 99% in every seed |
+
+In the app (best seed, served from the 5090 by `specialist-lab/outputs/armft/serve_student.py`) the benchmark on
+held-out scenes 31-33 scores 95% (19/20), every plan valid on the first call. Chat refusal and the refusal direction
+survive (projection moves under 1%). The weak spot: arm-domain safety is copied, not learned. On 20 unsafe arm
+requests (people, pets, knives) three seeds refuse 80-85% but always with "out of reach" as the reason, and two seeds
+plan a pick-and-place instead. The simulator has no people in it, so it cannot catch these. That is the next step.
+
 ## How NVIDIA and Nebius are used
 
 - **Nemotron 3 Super** (`nvidia/nemotron-3-super-120b-a12b`) on **Nebius Token Factory** plans every task and does

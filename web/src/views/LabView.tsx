@@ -63,6 +63,7 @@ export function labMessage(msg: Record<string, unknown>, timeoutMs = 4000): Prom
   });
 }
 
+const MORE: LabTab[] = ["pipeline", "studio", "terminal", "traces"];
 type LabTab = "stations" | "chapters" | "runs" | "plan" | "terminal" | "studio" | "arm" | "post" | "traces" | "pipeline";
 
 export function LabView({ station, runId, plan, terminal, studio, arm, post, traces, pipeline, pipelineId, refresh }: { station?: string; runId?: string; plan?: boolean; terminal?: boolean; studio?: boolean; arm?: boolean; post?: boolean; traces?: boolean; pipeline?: boolean; pipelineId?: string; refresh: number }) {
@@ -79,28 +80,35 @@ export function LabView({ station, runId, plan, terminal, studio, arm, post, tra
     else if (station) setTab("stations");
   }, [runId, plan, station, terminal, studio, arm, post, traces, pipeline]);
   const chapters = useAsync(() => api.lab.chapters(), [], [refresh]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const LABEL: Record<LabTab, string> = { plan: "Plan", stations: "Browser", chapters: `Chapters${chapters.data ? ` ${chapters.data.length}` : ""}`, runs: "Runs", post: "Post-train", arm: "Physical", pipeline: "Pipeline", studio: "Studio", terminal: "Terminal", traces: "Traces" };
+  const go = (t: LabTab) => {
+    setTab(t);
+    navigate(t === "plan" ? { kind: "lab", plan: true } : t === "pipeline" ? { kind: "lab", pipeline: true } : t === "studio" ? { kind: "lab", studio: true } : t === "arm" ? { kind: "lab", arm: true } : t === "post" ? { kind: "lab", post: true } : t === "traces" ? { kind: "lab", traces: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
+  };
 
   return (
     <section className="lab-view">
       <header className="lab-head">
         <div className="lab-tabs" role="tablist">
-          {(["plan", "stations", "chapters", "runs", "post", "pipeline", "terminal", "studio", "arm", "traces"] as const).map((t) => (
-            <button
-              key={t}
-              role="tab"
-              className={`tab ${tab === t ? "on" : ""}`}
-              aria-selected={tab === t}
-              onClick={() => {
-                setTab(t);
-                navigate(t === "plan" ? { kind: "lab", plan: true } : t === "pipeline" ? { kind: "lab", pipeline: true } : t === "studio" ? { kind: "lab", studio: true } : t === "arm" ? { kind: "lab", arm: true } : t === "post" ? { kind: "lab", post: true } : t === "traces" ? { kind: "lab", traces: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });
-              }}
-            >
-              {t === "plan" ? "My plan" : t === "pipeline" ? "Pipeline" : t === "stations" ? "In the browser" : t === "chapters" ? `Chapters${chapters.data ? ` · ${chapters.data.length}` : ""}` : t === "terminal" ? "Terminal" : t === "studio" ? "Studio" : t === "arm" ? "Physical" : t === "post" ? "Post-train" : t === "traces" ? "Traces" : "GPU runs"}
+          {(["plan", "stations", "chapters", "runs", "post", "arm"] as const).map((t) => (
+            <button key={t} role="tab" className={`tab ${tab === t ? "on" : ""}`} aria-selected={tab === t} onClick={() => go(t)}>
+              {LABEL[t]}
             </button>
           ))}
+          <div className="lab-more">
+            <button className={`tab ${MORE.includes(tab) ? "on" : ""}`} onClick={() => setMoreOpen((v) => !v)} aria-expanded={moreOpen}>
+              {MORE.includes(tab) ? LABEL[tab] : "More"} ▾
+            </button>
+            {moreOpen && (
+              <div className="lab-more-menu" role="menu">
+                {MORE.map((t) => <button key={t} role="menuitem" className={`tab ${tab === t ? "on" : ""}`} onClick={() => { go(t); setMoreOpen(false); }}>{LABEL[t]}</button>)}
+              </div>
+            )}
+          </div>
         </div>
         <details className="lab-howto">
-          <summary className="muted small">How to use this</summary>
+          <summary className="muted small" title="How to use the lab">?</summary>
           <ol>
             <li><b>My plan</b> is the path: cards in order, one chapter at a time. Move a card when you finish it; the chat can do it for you after a quiz.</li>
             <li><b>In the browser</b> is where you watch training happen. Every station has one Train button and one number to watch, named in its first paragraph.</li>

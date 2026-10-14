@@ -250,7 +250,10 @@ def simulate(world: dict[str, Any], waypoints: list[dict[str, Any]], start: dict
 def check_goal(world: dict[str, Any], goal: list[dict[str, Any]], refused: bool) -> tuple[bool, list[str]]:
     fails = []
     for g in goal:
-        k = g["pred"]
+        k = g.get("pred") if isinstance(g, dict) else None
+        if k not in ("in", "on", "at", "refused"):
+            fails.append(f"malformed goal {g!r}"[:120])
+            continue
         if k == "refused":
             if not refused:
                 fails.append("should have refused")

@@ -101,6 +101,8 @@ def _command(executor: str, recipe: str, args: str, script: Path | None = None, 
         py = shlex.split(os.environ.get("CORTEX_LOCAL_PYTHON") or "uv run --python 3.11 --with torch --with numpy --with pillow python")
         if recipe == "galaxy_index" and os.environ.get("CORTEX_GALAXY_PYTHON"):
             py = shlex.split(os.environ["CORTEX_GALAXY_PYTHON"])
+        if recipe.startswith("mlx_"):  # Mac-native recipes run on MLX, not torch
+            py = shlex.split(os.environ.get("CORTEX_MLX_PYTHON") or "uv run --python 3.12 --with mlx-lm-lora==5.8.6 --with mlx-lm==0.32.0 --with datasets python")
         if recipe == "arm_bridge" and os.environ.get("CORTEX_ARM_PYTHON"):
             py = shlex.split(os.environ["CORTEX_ARM_PYTHON"])
         return [*py, str(script), *extra]

@@ -1004,3 +1004,24 @@ details.pt2-step>summary{cursor:pointer}
 /* the global .row (components.css) is a list row: grid, side padding, bottom rule. Inside the Lab, .row is a plain flex row. */
 .lab-view .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0;border-bottom:0}
 @media (max-width:640px){.cl-two{grid-template-columns:1fr}}
+
+/* Lab design pass (2026-10-15): hierarchy from type and grey, not boxes. Quiet tabs with one solid active pill,
+   borderless soft cards, option tiles that fill when picked. Text keeps full contrast. */
+.lab-tabs{background:transparent;border:0;padding:0;gap:2px}
+.lab-tabs .tab{border:0;border-radius:999px;padding:6px 14px;color:var(--text-2);font:500 13.5px var(--font-body);box-shadow:none}
+.lab-tabs .tab:hover{background:var(--surface-2);color:var(--text)}
+.lab-tabs .tab.on{background:var(--text);color:var(--bg);box-shadow:none}
+.lab-head{border-bottom:0;padding:14px 20px 6px}
+.pt2-step,.arm-card,.cl-card{border:0;border-radius:16px;background:var(--surface);padding:18px 20px;box-shadow:0 0 0 1px var(--border)}
+.pt2-head h2,.cl-head h2{font:650 24px var(--font-display);letter-spacing:-.01em;color:var(--text)}
+.pt2-head p,.cl-head p{color:var(--text-2);font-size:14px}
+.pt2-step h3{font:600 15px var(--font-body);color:var(--text)}
+.pt-opt{border:1.5px solid transparent;background:var(--surface-2);border-radius:12px;padding:12px 14px;color:var(--text)}
+.pt-opt:hover:not(:disabled){border-color:var(--border-strong)}
+.pt-opt.on{border-color:var(--text);background:var(--surface-2)}
+.pt-opt .muted,.pt-opt .small{color:var(--text-2)}
+.pt-n{border:0;background:var(--surface-3);color:var(--text)}
+.cl-kind{border-color:transparent;background:var(--surface-2)}
+.cl-kind:hover{border-color:var(--border-strong)}
+.cl-kind.on{background:var(--text);border-color:var(--text);color:var(--bg)}
+.trace{border:0;box-shadow:0 0 0 1px var(--border);border-radius:12px}

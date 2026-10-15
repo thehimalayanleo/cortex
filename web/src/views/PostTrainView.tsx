@@ -294,7 +294,7 @@ export function PostTrainView({ refresh }: { refresh: number }) {
           )}
           {c ? (
             <>
-              <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{c.ok ? "Better. You can use this model." : "Not better. Do not use this model."}</div>
+              <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{job.method === "compress" ? (c.ok ? "Kept. You can use the compressed model." : "Not kept. Do not use the compressed model.") : c.ok ? "Better. You can use this model." : "Not better. Do not use this model."}</div>
               <div className="small">{c.why}</div>
               <div className="pt-nums">
                 <div><div className="muted small">Skill score on new questions</div><div className="big">{pct(c.base.task_score)} → {pct(c.tuned.task_score)}</div></div>

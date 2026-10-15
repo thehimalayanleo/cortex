@@ -281,12 +281,12 @@ export function PostTrainView({ refresh }: { refresh: number }) {
             <button className="lnk small" onClick={() => navigate({ kind: "lab", run: job.run })}>log</button>
           </div>
           <div className="pt-flow">
-            {["1 Train", "2 Test on new questions", "3 Decide"].map((s, i) => {
+            {[job.method === "compress" ? "1 Set weights to zero" : "1 Train", "2 Test on new questions", "3 Decide"].map((s, i) => {
               const at = job.status === "failed" ? -1 : stage(job);
               return <span key={s} className={`pt-flow-s ${at > i || (at === 2 && i === 2) ? "done" : at === i ? "now" : ""}`}>{s}</span>;
             })}
           </div>
-          <Curve pts={job.metrics.filter((x) => x.loss != null).map((x) => x.loss!)} />
+          {job.method !== "compress" && <Curve pts={job.metrics.filter((x) => x.loss != null).map((x) => x.loss!)} />}
           {job.status === "failed" && (
             <div className="pt-bad">
               The job failed. {(job.log.slice().reverse().find((l) => /busy|out of memory|Error|failed/i.test(l)) ?? "Open the log.").replace(/^.*OutOfMemoryError.*$/, "The GPU ran out of memory (another job was using it).").slice(0, 240)}
@@ -300,7 +300,7 @@ export function PostTrainView({ refresh }: { refresh: number }) {
                 <div><div className="muted small">Skill score on new questions</div><div className="big">{pct(c.base.task_score)} → {pct(c.tuned.task_score)}</div></div>
                 <div><div className="muted small">Refuses harmful requests</div><div className="big">{pct(c.base.refusal)} → {pct(c.tuned.refusal)}</div></div>
               </div>
-              <div className="muted small">Left number: before training. Right number: after training.</div>
+              <div className="muted small">{job.method === "compress" ? "Left number: before compression. Right number: after compression." : "Left number: before training. Right number: after training."}</div>
               {job.where.includes("Mac") && (
                 <div className="pt-try">
                   <b>Try it</b>

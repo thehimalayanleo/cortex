@@ -41,8 +41,17 @@ def main():
     ap.add_argument("--safety", action="store_true", help="add the ARM-SAFE-1 refusal examples")
     ap.add_argument("--max-steps", type=int, default=0)
     a = ap.parse_args()
-    if pids("armft.py run"):
-        raise SystemExit("another arm training run is using the GPU; try again when it finishes")
+    if pids("armft.py run") or pids("prune1.py"):
+        raise SystemExit("The 5090 is busy with another training job. Try again when it finishes.")
+    # GPU check before pausing anything: training needs about 15 GB; the planner server's memory comes back when it pauses
+    q = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"], capture_output=True, text=True).stdout
+    apps = [(int(a), int(b)) for a, b in (l.split(",") for l in q.strip().splitlines() if l.strip())]
+    server = set(pids("python serve_student.py"))
+    free = int(subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True).stdout.split()[0])
+    free += sum(m for p, m in apps if p in server)
+    others = [p for p, _ in apps if p not in server]
+    if free < 15000 or len(others) >= 2:
+        raise SystemExit(f"The 5090 is busy: {free // 1000} GB free after pausing the planner, {len(others)} other GPU jobs. Training needs about 15 GB and at most one other job. Try again later.")
     tag = ("appsafe" if a.safety else "app") + (f"smoke{a.max_steps}" if a.max_steps else "")
     HOME.mkdir(exist_ok=True)
     for f in ("armft.py", "serve_student.py", "arm_world.py"):  # the box runs exactly the synced code

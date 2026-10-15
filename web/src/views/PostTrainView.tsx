@@ -237,7 +237,11 @@ export function PostTrainView({ refresh }: { refresh: number }) {
             })}
           </div>
           <Curve pts={job.metrics.filter((x) => x.loss != null).map((x) => x.loss!)} />
-          {job.status === "failed" && <div className="pt-bad">The job failed. Open the log.</div>}
+          {job.status === "failed" && (
+            <div className="pt-bad">
+              The job failed. {(job.log.slice().reverse().find((l) => /busy|out of memory|Error|failed/i.test(l)) ?? "Open the log.").replace(/^.*OutOfMemoryError.*$/, "The GPU ran out of memory (another job was using it).").slice(0, 240)}
+            </div>
+          )}
           {c ? (
             <>
               <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{c.ok ? "Better. You can use this model." : "Not better. Do not use this model."}</div>

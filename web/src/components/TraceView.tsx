@@ -9,13 +9,13 @@ const STEP: Record<string, string> = {
   "model call": "Model writes a plan",
   "parse reply": "Plan is readable",
   compile: "Arm can reach every point",
-  simulate: "No crash or drop",
+  simulate: "No collision or drop",
   "check goal": "Ends in the stated goal",
   "start motion": "Arm moves",
 };
 const secs = (s: TraceSpan) => `${(((s.end ?? s.start) - s.start) / 1000).toFixed(1)} s`;
 const errs = (s: TraceSpan) => (Array.isArray(s.attrs.errors) ? (s.attrs.errors as string[]) : [])
-  .concat(s.attrs.error ? [s.kind === "parse" ? `the reply is not valid JSON, so the simulator cannot read it (${s.attrs.error})` : String(s.attrs.error)] : []);
+  .concat(s.attrs.error ? [s.kind === "parse" ? `the reply is not valid JSON, so the simulator cannot read the plan (${s.attrs.error})` : String(s.attrs.error)] : []);
 const clean = (e: string) => e.replace(/^step 0: /, "").replace(/^step (\d+): /, "plan step $1: ").replace(/^your declared goal does not hold after the program: /, "goal not met: ");
 
 function Try({ n, span, steps }: { n: number; span: TraceSpan; steps: TraceSpan[] }) {
@@ -31,7 +31,7 @@ function Try({ n, span, steps }: { n: number; span: TraceSpan; steps: TraceSpan[
         <span className={ok ? "tr-ok" : "tr-bad"}>{ok ? "passed" : "failed"}</span>
         <span className="muted">{secs(span)}</span>
         <span className="grow" />
-        <button className="lnk small" onClick={() => setOpen((v) => !v)}>{open ? "hide details" : "details"}</button>
+        <button className="lnk small" onClick={() => setOpen((v) => !v)}>{open ? "Hide details" : "Details"}</button>
       </div>
       <div className="tr-steps">
         {steps.filter((s) => STEP[s.name]).map((s) => (
@@ -43,12 +43,12 @@ function Try({ n, span, steps }: { n: number; span: TraceSpan; steps: TraceSpan[
         <div className="tr-more">
           {steps.flatMap(errs).length > 1 && <ul className="tr-errs">{steps.flatMap(errs).map((e, i) => <li key={i}>{clean(e)}</li>)}</ul>}
           {llm && <div className="muted small">{String(llm.attrs.model ?? "")} · {secs(llm)}</div>}
-          {n > 1 && llm?.attrs.input != null && <><div className="muted small">What the model was told</div><pre className="tr-pre">{String(llm.attrs.input)}</pre></>}
+          {n > 1 && llm?.attrs.input != null && <><div className="muted small">Message to the model</div><pre className="tr-pre">{String(llm.attrs.input)}</pre></>}
           {Array.isArray(parse?.attrs.program) && (
-            <><div className="muted small">The plan it wrote</div>
+            <><div className="muted small">Plan from the model</div>
               <pre className="tr-pre">{(parse!.attrs.program as unknown[]).map((op, i) => `${String(i + 1).padStart(2)} ${JSON.stringify(op)}`).join("\n")}</pre></>
           )}
-          {!parse && llm?.attrs.output != null && <><div className="muted small">Model reply</div><pre className="tr-pre">{String(llm.attrs.output)}</pre></>}
+          {!parse && llm?.attrs.output != null && <><div className="muted small">Reply from the model</div><pre className="tr-pre">{String(llm.attrs.output)}</pre></>}
         </div>
       )}
     </div>
@@ -70,10 +70,10 @@ export function TraceView({ spans }: { spans: TraceSpan[] }) {
     <div className="tr">
       <div className={`tr-sum ${ok ? "ok" : "bad"}`}>
         {ok
-          ? `Passed on try ${n} of up to 3. ${moved ? "The arm moved." : "Not run yet."} Total ${secs(root)}.`
-          : `Rejected after ${n} ${n === 1 ? "try" : "tries"}. Nothing moved. Last problem: ${lastProblem ? clean(lastProblem) : "unknown"}.`}
+          ? `Passed on try ${n} of 3. ${moved ? "The arm moved." : "The arm did not move yet."} Time: ${secs(root)}.`
+          : `The simulator rejected ${n} ${n === 1 ? "try" : "tries"}. The arm did not move. Last problem: ${lastProblem ? clean(lastProblem) : "unknown"}.`}
       </div>
-      <div className="tr-note">The model writes a plan. The simulator checks it. If a check fails, the errors go back to the model, up to 3 tries. Only a plan that passes every check can move the arm.</div>
+      <div className="tr-note">The model writes a plan, and the simulator checks it. If a check fails, the lab sends the errors back to the model, for a maximum of 3 tries. Only a plan that passes all checks can move the arm.</div>
       {groups.map((g, i) => <Try key={g.span.id} n={i + 1} span={g.span} steps={g.steps} />)}
     </div>
   );

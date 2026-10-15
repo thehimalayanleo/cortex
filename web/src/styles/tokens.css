@@ -25,9 +25,12 @@
   --shadow-lg: 0 2px 4px rgba(20, 40, 34, 0.08), 0 24px 64px rgba(20, 40, 34, 0.18);
   --code-bg: #eef2f0;
 
-  --font-display: "Bricolage Grotesque", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
-  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Inter for all interface text, Instrument Serif for page titles only, Geist Mono for numbers and code
+     (after recent.design and Mintlify: one sans, a serif for big titles, a mono for figures) */
+  --font-display: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-title: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --fs-xs: 11px;
   --fs-sm: 12.5px;

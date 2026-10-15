@@ -1050,3 +1050,76 @@ details.pt2-step>summary{cursor:pointer}
 .cc-input textarea:focus{outline:none;border-color:var(--accent)}
 .cc-actions{display:flex;flex-direction:column;gap:6px}
 @media (max-width:760px){.cc-cols{grid-template-columns:1fr}}
+
+/* Post-train layout pass 2 (2026-10-15): steps as label column + choices with hairlines between them (after a
+   dark FAQ panel on recent.design); a job as properties and big numbers on the left, an event feed on the right
+   (after Interfere's issue page); earlier jobs as a list grouped by day with one meta line per row. */
+.pt2{max-width:1180px;margin:0 auto;padding:8px 24px 48px;display:flex;flex-direction:column;gap:28px}
+.pt2-head h2{font:400 44px/1.05 var(--font-title);letter-spacing:-.015em;margin:8px 0 10px;color:var(--text)}
+.pt2-head p{font-size:15px;color:var(--text-2);max-width:62ch;margin:0 0 14px}
+.pt2-head .row{gap:12px}
+.pt-note{font-size:13px;color:var(--text-2);line-height:1.5}
+p.pt-note{margin:0}
+.ps-list{border-top:1px solid var(--border);display:flex;flex-direction:column}
+.ps{display:grid;grid-template-columns:minmax(180px,250px) minmax(0,1fr);gap:16px 40px;padding:26px 0;border-bottom:1px solid var(--border)}
+.ps-side{display:flex;flex-direction:column;gap:6px}
+.ps-side h3{margin:0;font:600 16px var(--font-body);color:var(--text);letter-spacing:-.01em}
+.ps-side p{margin:0;font-size:13px;line-height:1.5;color:var(--text-2)}
+.ps-n{font:500 12px var(--font-mono);color:var(--text-3)}
+.ps-main{display:flex;flex-direction:column;gap:12px;min-width:0}
+.ps-main .row{gap:10px}
+.pt-opt b{font-weight:600;font-size:14px}
+.pt-opt .small{font-size:13px}
+/* job panel */
+.jp{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);border-radius:16px;background:var(--surface);box-shadow:0 0 0 1px var(--border);overflow:hidden}
+.jp-side{display:flex;flex-direction:column;gap:14px;padding:22px 24px;border-right:1px solid var(--border)}
+.jp-id{font-size:12px;color:var(--text-3)}
+.jp-title{margin:-6px 0 0;font:400 30px/1.1 var(--font-title);color:var(--text)}
+.jp-pill{font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--surface-3);color:var(--text)}
+.jp-pill.ok{background:var(--ok);color:var(--on-accent)}
+.jp-pill.bad{background:var(--danger);color:var(--surface)}
+.jp-pill.now{background:var(--warn-soft);color:var(--warn)}
+.jp-props{margin:0;display:flex;flex-direction:column;border-top:1px solid var(--border)}
+.jp-props div{display:grid;grid-template-columns:110px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13.5px}
+.jp-props dt{color:var(--text-2)}
+.jp-props dd{margin:0;color:var(--text)}
+.jp-big{display:flex;flex-direction:column;gap:6px}
+.jp-cap{font:600 11px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
+.jp-val{font:500 30px var(--font-mono);color:var(--text);letter-spacing:-.02em}
+.jp-arrow{color:var(--text-3);font-size:22px}
+.jp-feed{list-style:none;margin:0;padding:22px 28px;display:flex;flex-direction:column;gap:18px;position:relative}
+.jp-ev{position:relative;padding-left:22px}
+.jp-ev::before{content:"";position:absolute;left:4px;top:18px;bottom:-18px;width:1px;background:var(--border)}
+.jp-ev:last-child::before{display:none}
+.jp-ev-head{display:flex;align-items:baseline;gap:8px;font-size:13px;color:var(--text-2)}
+.jp-ev-head b{font-weight:600;color:var(--text)}
+.jp-dot{position:absolute;left:0;top:5px;width:9px;height:9px;border-radius:50%;background:var(--border-strong)}
+.jp-ev.ok .jp-dot{background:var(--ok)}
+.jp-ev.bad .jp-dot{background:var(--danger)}
+.jp-ev.now .jp-dot{background:var(--warn);box-shadow:0 0 0 4px var(--warn-soft)}
+.jp-when{font:12px var(--font-mono);color:var(--text-3)}
+.jp-ev-body{margin-top:4px;font-size:14px;line-height:1.55;color:var(--text);max-width:68ch}
+.jn{font:500 13.5px var(--font-mono)}
+.jn.up{color:var(--ok)}
+.jn.down{color:var(--danger)}
+.jp-path{display:block;font-size:12px;color:var(--text-2);margin:4px 0;word-break:break-all}
+.jp-quote{display:block;margin-top:6px;padding:8px 10px;border-radius:8px;background:var(--surface-2);font-size:13px;color:var(--text)}
+.pt-next{border-top:1px solid var(--border);padding-top:14px}
+.pt-next .pt-note{margin-top:4px}
+/* job list */
+.jl{display:flex;flex-direction:column;gap:18px}
+.jl-day{font:600 11px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--text-2);margin-bottom:4px}
+.jl-row{display:flex;align-items:flex-start;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:10px;background:transparent;color:var(--text);text-align:left;cursor:pointer;font:inherit}
+.jl-row:hover{background:var(--surface-2)}
+.jl-row.on{background:var(--surface-2);box-shadow:inset 2px 0 0 var(--text)}
+.jl-dot{flex:none;width:8px;height:8px;margin-top:6px;border-radius:50%;background:var(--border-strong)}
+.jl-dot.ok{background:var(--ok)}.jl-dot.bad{background:var(--danger)}.jl-dot.now{background:var(--warn)}
+.jl-main{display:flex;flex-direction:column;gap:1px;min-width:0}
+.jl-title{font-size:14px;font-weight:500}
+.jl-meta{font-size:12.5px;color:var(--text-2)}
+.jl-meta b{font-weight:600}
+.jl-meta b.ok{color:var(--ok)}.jl-meta b.bad{color:var(--danger)}.jl-meta b.now{color:var(--warn)}
+.pt-inuse b{font-family:var(--font-body)}
+@media (max-width:900px){.ps{grid-template-columns:1fr;gap:12px}.jp{grid-template-columns:1fr}.jp-side{border-right:0;border-bottom:1px solid var(--border)}}
+.cl-head h2{font:400 40px/1.05 var(--font-title);letter-spacing:-.015em;margin:4px 0 8px}
+.cl-head p{font-size:15px}

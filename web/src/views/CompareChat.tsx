@@ -33,7 +33,7 @@ export function CompareChat({ left, right, onPick }: { left: string; right: stri
         const r = await api.post.chat(side === "left" ? left : right, h[side].map(({ role, content }) => ({ role, content })));
         h = { ...h, [side]: [...h[side], { role: "assistant", content: r.reply, seconds: r.seconds }] };
       } catch (e) {
-        h = { ...h, [side]: [...h[side], { role: "assistant", content: `(no reply: ${errorMessage(e)})` }] };
+        h = { ...h, [side]: [...h[side], { role: "assistant", content: `No reply: ${errorMessage(e)}` }] };
       }
       setHist(h);
     }
@@ -46,14 +46,14 @@ export function CompareChat({ left, right, onPick }: { left: string; right: stri
         {targets.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
       </select>
       <div className="cc-log">
-        {hist[side].length === 0 && <div className="cc-empty">Ask something below. Both models get the same message.</div>}
+        {hist[side].length === 0 && <div className="cc-empty">Ask a question below. Both models get the same message.</div>}
         {hist[side].map((m, i) => (
           <div key={i} className={`cc-msg ${m.role}`}>
             <div className="cc-text">{m.content}</div>
             {m.seconds != null && <div className="cc-meta">{m.seconds} s</div>}
           </div>
         ))}
-        {busy === side && <div className="cc-msg assistant cc-wait">Thinking… (the first reply loads the model)</div>}
+        {busy === side && <div className="cc-msg assistant cc-wait">Waiting for the reply. The first reply also loads the model.</div>}
       </div>
     </div>
   );
@@ -64,7 +64,7 @@ export function CompareChat({ left, right, onPick }: { left: string; right: stri
       <div ref={endRef} />
       {err && <div className="pt-bad small">{err}</div>}
       <div className="cc-input">
-        <textarea value={text} rows={2} placeholder="Message both models (Enter sends, Shift+Enter for a new line)" onChange={(e) => setText(e.target.value)}
+        <textarea value={text} rows={2} placeholder="Message both models. Enter sends. Shift+Enter adds a line." onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} />
         <div className="cc-actions">
           <button className="btn primary" disabled={!!busy || !text.trim()} onClick={() => void send()}>{busy ? "Waiting…" : "Send"}</button>

@@ -63,11 +63,17 @@ def model_config(model: str) -> dict:
         return {}
 
 
-def estimate_gb(model: str, mode: str, seq: int, group: int, batch: int = 2, layers: int = 8) -> float:
-    """Peak memory for a run on this Mac. Fit on measured LoRA SFT peaks (2026-10-15, 8 LoRA layers, batch 2, 1,024
-    tokens): Qwen3-0.6B 1.45 GB, Llama-3.2-1B 3.01 GB, LFM2-1.2B 2.77 GB. Activations of the trained layers scale
-    with batch x tokens x (hidden + MLP width); logits with batch x tokens x vocabulary. Plus 25% margin (Llama-3.2-3B ran 5% over the 15% version).
-    Without a config (offline, unknown model) it falls back to a generous size-only guess."""
+# typical length of one training example, in tokens: memory follows the real length, not the --seq ceiling
+# (math examples are short; arm examples fill 1,024 tokens). Uploaded data counts as full length.
+TASK_TOKENS = {"gsm8k": 350, "code": 400, "arm": 1100}
+
+
+def estimate_gb(model: str, mode: str, seq: int, group: int, batch: int = 2, layers: int = 8, task: str = "") -> float:
+    """Peak memory for a run on this Mac. Fit on measured LoRA SFT peaks (2026-10-15, 8 LoRA layers): math at batch 2,
+    Qwen3-0.6B 1.45 GB, Llama-3.2-1B 3.01 GB, LFM2-1.2B 2.77 GB; checked on arm at batch 2, Qwen3-0.6B 3.75 GB.
+    Activations of the trained layers scale with batch x example tokens x (hidden + MLP width); logits with batch x
+    example tokens x vocabulary; 20% margin on those. Without a config it falls back to a generous size-only guess.
+    The trainer also stops a run whose measured peak passes the cap (stream())."""
     m = re.search(r"(\d+(?:\.\d+)?)B", model, re.I)
     params_b = float(m.group(1)) if m else 8.0               # unknown size: assume big, so the check stays safe
     bits = 4 if re.search(r"4.?bit|mxfp4|nvfp4", model, re.I) else 8 if re.search(r"8.?bit", model, re.I) else 16
@@ -77,6 +83,7 @@ def estimate_gb(model: str, mode: str, seq: int, group: int, batch: int = 2, lay
     h = cfg.get("hidden_size")
     if mode in ("infer", "eval"):
         return round(weights + 0.3 + (2e-9 * seq * cfg.get("vocab_size", 150000) if h else 0), 2)
+    seq = min(seq, TASK_TOKENS.get(task, seq))
     if not h:
         act = 0.4 + 2.0 * batch * seq / 1024 * params_b ** 0.5
         return round(weights + act * (max(1, group) if mode == "grpo" else 1), 2)
@@ -86,10 +93,10 @@ def estimate_gb(model: str, mode: str, seq: int, group: int, batch: int = 2, lay
         ff = -(-int(2 * ff / 3 * cfg.get("block_ffn_dim_multiplier", 1.0)) // mult) * mult
     width = h + ff
     tokens = batch * seq * (max(1, group) if mode == "grpo" else 1)
-    act = 1.21e-8 * tokens * min(layers, cfg.get("num_hidden_layers", layers)) * width + 4.37e-10 * tokens * cfg.get("vocab_size", 150000)
+    act = 3.54e-8 * tokens * min(layers, cfg.get("num_hidden_layers", layers)) * width + 1.28e-9 * tokens * cfg.get("vocab_size", 150000)
     if cfg.get("hybrid_override_pattern") or "mamba" in str(cfg.get("model_type", "")):  # Mamba scan states: Nemotron-3-Nano-4B
         act *= 3.0  # measured 4.77 GB at batch 1, 512 tokens where the attention-only fit said 4.07
-    return round((weights + 0.15 + act) * 1.25, 2)
+    return round(weights + 0.15 + act * 1.2, 2)
 
 
 def write_data(task, mode: str, out: Path, safety: bool) -> Path:
@@ -106,8 +113,9 @@ def write_data(task, mode: str, out: Path, safety: bool) -> Path:
     return out
 
 
-def stream(cmd: list[str], env: dict) -> int:
-    """Run the MLX trainer and turn its progress lines into METRIC lines."""
+def stream(cmd: list[str], env: dict, stop_gb: float = 0.0) -> int:
+    """Run the MLX trainer and turn its progress lines into METRIC lines. If a reported peak passes stop_gb, stop the
+    trainer: the estimate was wrong, and the Mac must not go into swap."""
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     it = 0
     for raw in p.stdout:
@@ -118,6 +126,10 @@ def stream(cmd: list[str], env: dict) -> int:
         if m:
             it = int(m.group(1))
             metric(step=it, loss=float(m.group(2)), peak_gb=float(m.group(3)))
+            if stop_gb and float(m.group(3)) > stop_gb:
+                p.kill()
+                p.wait()
+                raise SystemExit(f"stopped at step {it}: memory reached {m.group(3)} GB, above the limit of {stop_gb:.1f} GB (cap plus 10%)")
             continue
         m = re.search(r"Iter (\d+): Val loss ([\d.]+)", line)
         if m:
@@ -204,7 +216,7 @@ def main():
     a = ap.parse_args()
 
     cap = float(os.environ.get("CORTEX_MLX_MAX_GB", "4"))
-    need = estimate_gb(a.model, a.mode, a.seq, a.group, 1 if a.mode in ("infer", "eval") else a.batch)
+    need = estimate_gb(a.model, a.mode, a.seq, a.group, 1 if a.mode in ("infer", "eval") else a.batch, task="custom" if a.task.startswith("custom:") else a.task)
     status(phase="check", msg=f"estimated {need} GB for {a.mode} on {a.model}; local cap {cap} GB")
     if need > cap:
         raise SystemExit(f"estimated {need} GB is above the local cap of {cap} GB: use a smaller or 4-bit model, or run it on the 5090")
@@ -306,7 +318,7 @@ def main():
         cmd += ["--resume-adapter-file", a.resume]
     status(phase="train", msg=f"{a.mode} on {a.task}, {a.iters} iters")
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PT_TASK": a.task}
-    if stream(cmd, env):
+    if stream(cmd, env, stop_gb=cap * 1.1):
         raise SystemExit("mlx-lm-lora failed")
     adapter = str(out / "adapters" / "adapters.safetensors")
     res = {"mode": a.mode, "model": a.model, "task": a.task, "iters": a.iters, "adapter": adapter, "train_seconds": round(time.time() - t0, 1), "estimate_gb": need}

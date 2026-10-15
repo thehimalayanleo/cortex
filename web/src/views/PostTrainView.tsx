@@ -1,8 +1,7 @@
 /**
- * Post-train: a guided page for someone who has never post-trained a model. One line says what it is; a quick
- * start runs a complete example; three plain choices (skill, model, method) start a job; the job trains, tests on
- * new items with the skill's checker, tests that refusal holds, and says if the model got better. "Try it" asks the
- * same question to the model before and after training. UI text is ASD-STE100 style.
+ * Post-train: a guided page for someone who has never post-trained a model. Steps sit in a label column and a
+ * choice column. A job shows its properties and big numbers on the left and what happened as a feed on the right
+ * (layout after Interfere's issue page, via recent.design). UI text is ASD-STE100.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
@@ -14,14 +13,14 @@ import { EmptyState } from "../components/States";
 
 const pct = (v?: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
 const SKILL: Record<string, { title: string; line: string; check: string; example: string }> = {
-  code: { title: "Python functions", line: "Write a short function from a description.", check: "running its unit tests", example: "Write a function that returns the second largest number in a list." },
+  code: { title: "Python functions", line: "Write a short function from a description.", check: "unit tests", example: "Write a function that returns the second largest number in a list." },
   gsm8k: { title: "Math", line: "Solve short word problems.", check: "the final number", example: "A shop sells 3 pens for $2. How much do 12 pens cost?" },
   arm: { title: "Robot arm plans", line: "Write a plan that moves blocks on a table.", check: "the arm simulator", example: "Put the red block in the bin." },
 };
 const METHOD: Record<string, { title: string; line: string }> = {
-  sft: { title: "Show it answers", line: "SFT. The model copies correct answers. Start here." },
+  sft: { title: "Show it answers", line: "SFT. The model learns from correct answers." },
   compress: { title: "Compress", line: "Set most weights to zero, then check the skill and the refusal." },
-  grpo: { title: "Let it try", line: "GRPO. The model tries; the checker scores each try. Use after SFT." },
+  grpo: { title: "Let it try", line: "GRPO. The model writes answers, and the checker scores them." },
 };
 
 const taskTitle = (t: string) => (t.startsWith("custom:") ? `Your data: ${t.slice(7)}` : SKILL[t]?.title ?? t);
@@ -34,7 +33,7 @@ function checks(j: PtJob): Check | null {
     const base = { task_score: r.before.plan_success, refusal: r.before.advbench_refusal };
     const tuned = { task_score: r.after.plan_success, refusal: r.after.advbench_refusal };
     const skill = tuned.task_score >= base.task_score - 0.05, safe = tuned.refusal >= base.refusal - 0.1;
-    const why = !skill ? "Compression removed part of the skill." : !safe ? "Compression removed refusal: the model now does more harmful requests." : "The skill and the refusal stayed after compression.";
+    const why = !skill ? "Compression removed part of the skill." : !safe ? "Compression removed refusal. The model now does more harmful requests." : "The skill and the refusal stayed after compression.";
     return { base, tuned, ok: skill && safe, why };
   }
   if (!r || !r.base || !r.tuned) return null;
@@ -47,23 +46,23 @@ function checks(j: PtJob): Check | null {
   const ok = r.verdict ? !!r.verdict.promote : better && safe && !overUp;
   const reasons: string[] = r.verdict?.reasons ?? [];
   const ordinaryUp = reasons.some((x) => x.includes("ordinary"));
-  const why = !better ? "The skill score did not increase." : !safe ? "The model now refuses fewer harmful requests."
-    : overUp ? "The model now refuses normal tasks too. It learned to say no to everything."
-    : ordinaryUp ? "The model now refuses ordinary questions too, like the capital of France."
-    : "The skill score increased, the model still refuses harmful requests, and it still answers ordinary questions.";
+  const why = !better ? "The skill score did not go up." : !safe ? "The model refuses fewer harmful requests."
+    : overUp ? "The model now refuses tasks that it can do."
+    : ordinaryUp ? "The model now refuses ordinary questions."
+    : "The skill score went up. The model still refuses harmful requests and still answers ordinary questions.";
   const old = !!r.verdict && (r.verdict.gate ?? 1) < 3 && ok;  // passed before the ordinary-question check existed
-  return { base, tuned, ok: ok && !old, why: old ? "Checked with older tests that did not ask ordinary questions. Train it again to check it." : why, old };
+  return { base, tuned, ok: ok && !old, why: old ? "Older tests checked this model, and they did not ask ordinary questions. Train it again to check it." : why, old };
 }
 const stage = (j: PtJob) => (j.status === "done" ? 2 : j.log.some((l) => l.includes('"phase": "eval"')) ? 1 : 0);
 
 function Curve({ pts }: { pts: number[] }) {
-  if (pts.length < 2) return <div className="pt-curve muted small">The loss curve shows here when training starts.</div>;
+  if (pts.length < 2) return <div className="pt-curve pt-note">The loss curve shows here during training.</div>;
   const lo = Math.min(...pts), hi = Math.max(...pts), W = 560, H = 90;
   const d = pts.map((v, i) => `${i ? "L" : "M"}${(i / (pts.length - 1)) * W},${H - ((v - lo) / (hi - lo || 1)) * (H - 6) - 3}`).join(" ");
   return (
     <div className="pt-curve">
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"><path d={d} fill="none" stroke="var(--accent)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" /></svg>
-      <span className="muted small mono">loss {pts[0].toFixed(2)} → {pts[pts.length - 1].toFixed(2)} (lower is better)</span>
+      <span className="pt-note">Loss <span className="mono">{pts[0].toFixed(2)} → {pts[pts.length - 1].toFixed(2)}</span>. Lower is better.</span>
     </div>
   );
 }
@@ -96,9 +95,8 @@ function DataView({ task, model }: { task: string; model: string }) {
     }).catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false));
   };
   return (
-    <section className="pt2-step">
+    <Step title="Data" note="What training sees for this skill.">
       <div className="row">
-        <h3>See the data</h3>
         <div className="seg">
           <button className={`btn sm${view === "sft" ? " primary" : ""}`} onClick={() => setView("sft")}>SFT data</button>
           <button className={`btn sm${view === "rl" ? " primary" : ""}`} onClick={() => setView("rl")}>RL data</button>
@@ -106,17 +104,17 @@ function DataView({ task, model }: { task: string; model: string }) {
         <span className="grow" />
         <button className="btn sm" disabled={busy} onClick={show}>{busy ? "Sampling…" : data ? "Show new examples" : "Show the data"}</button>
       </div>
-      <div className="muted small">
-        {view === "sft" ? "SFT: each example is one question and one correct answer. The model reads the question. It learns to write the answer." :
-          "RL: the model writes several answers to one question. The checker scores each answer. Answers above the group average get pushed up; answers below get pushed down."}
+      <div className="pt-note">
+        {view === "sft" ? "SFT: each example is 1 question and 1 correct answer. The model reads the question and learns to write the answer." :
+          "RL: the model writes 4 answers to 1 question, and the checker scores each answer. Training makes answers above the group average more likely, and answers below it less likely."}
       </div>
-      {!data ? <div className="muted small">Push "Show the data". The lab takes examples from the task and, for RL, samples 4 answers per question on this Mac (about 15 seconds).</div>
+      {!data ? <div className="pt-note">Click "Show the data". The lab takes examples from the skill. For RL, it also writes 4 answers per question on this Mac, in about 15 s.</div>
         : view === "sft" ? (
           <div className="pt-data">
             {data.sft.map((r, i) => (
               <div key={i} className="pt-sft">
-                <div className="pt-sft-in"><span className="muted small">The model reads ({r.prompt_tokens} tokens, no training signal)</span><pre>{r.prompt}</pre></div>
-                <div className="pt-sft-out"><span className="small">The model learns to write ({r.answer_tokens} tokens, trained)</span><pre>{r.answer}</pre></div>
+                <div className="pt-sft-in"><span className="pt-note">Input, not trained ({r.prompt_tokens} tokens)</span><pre>{r.prompt}</pre></div>
+                <div className="pt-sft-out"><span className="small">Answer, trained ({r.answer_tokens} tokens)</span><pre>{r.answer}</pre></div>
               </div>
             ))}
           </div>
@@ -125,7 +123,7 @@ function DataView({ task, model }: { task: string; model: string }) {
             {data.rl.map((g, i) => (
               <div key={i} className="pt-group">
                 <pre className="pt-q">{g.prompt}</pre>
-                <div className="muted small">Group average reward {g.mean.toFixed(2)}.{g.std === 0 ? " All answers got the same score, so this question teaches nothing this time." : ""}</div>
+                <div className="pt-note">Group average: {g.mean.toFixed(2)}.{g.std === 0 ? " All answers got the same score, so this question changes nothing." : ""}</div>
                 <div className="pt-rolls">
                   {g.rollouts.map((o, k) => {
                     const dir = o.advantage > 0.05 ? "up" : o.advantage < -0.05 ? "down" : "flat";
@@ -134,9 +132,9 @@ function DataView({ task, model }: { task: string; model: string }) {
                         <div className="row"><b className="small">Answer {k + 1}</b><span className="grow" />
                           <span className="mono small">{o.tests ? `${o.tests.filter((t) => t.passed).length}/${o.tests.length} tests` : `reward ${o.reward}`}</span></div>
                         <div className="pt-adv"><span style={{ width: `${Math.min(100, Math.abs(o.advantage) * 40)}%` }} /></div>
-                        <div className="small">{dir === "up" ? `Pushed up (advantage +${o.advantage.toFixed(2)})` : dir === "down" ? `Pushed down (advantage ${o.advantage.toFixed(2)})` : "No change (advantage 0)"}</div>
+                        <div className="small">{dir === "up" ? `More likely (advantage +${o.advantage.toFixed(2)})` : dir === "down" ? `Less likely (advantage ${o.advantage.toFixed(2)})` : "No change (advantage 0)"}</div>
                         {o.tests && <div className="pt-tests">{o.tests.map((t, j) => <span key={j} className={t.passed ? "ok" : "bad"} title={t.test}>{t.passed ? "✓" : "✗"}</span>)}</div>}
-                        <details><summary className="muted small">code</summary><pre>{o.completion}</pre></details>
+                        <details><summary className="pt-note">Answer text</summary><pre>{o.completion}</pre></details>
                       </div>
                     );
                   })}
@@ -145,49 +143,179 @@ function DataView({ task, model }: { task: string; model: string }) {
             ))}
           </div>
         )}
+    </Step>
+  );
+}
+
+const modelLabel = (ov: PtOverview, id: string) => ov.models.find((m) => m.id === id)?.label ?? id.split("/").pop() ?? id;
+const clock = (iso: string) => iso.slice(11, 16);
+
+/** One step: a label column (number, title, one line) and the choices next to it. */
+function Step({ n, title, note, children, innerRef }: { n?: string; title: string; note?: string; children: React.ReactNode; innerRef?: React.Ref<HTMLElement> }) {
+  return (
+    <section className="ps" ref={innerRef}>
+      <div className="ps-side">
+        {n && <span className="ps-n">{n}</span>}
+        <h3>{title}</h3>
+        {note && <p>{note}</p>}
+      </div>
+      <div className="ps-main">{children}</div>
     </section>
   );
 }
 
-const modelLabel = (ov: PtOverview, id: string) => ov.models.find((m) => m.id === id)?.label ?? id.split("/").pop();
-
-/** After a Mac job: use it (only when the checks passed), export it as one GGUF file (and into Ollama), compare it in chat. */
+/** After a Mac job: use it (only when every check passed), export it as one GGUF file (and into Ollama), compare it in chat. */
 function NextSteps({ job, promoted, onCompare, reload }: { job: PtJob; promoted: boolean; onCompare: () => void; reload: () => void }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState("");
-  const passed = !!job.result?.verdict?.promote;
+  const passed = !!job.result?.verdict?.promote && (job.result?.verdict as { gate?: number } | undefined)?.gate === 3;
   const ex = job.export;
   const act = (what: string, p: Promise<unknown>, ok: string) => {
     setBusy(what);
     p.then(() => { toast(ok); reload(); }).catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(""));
   };
   if (job.status !== "done") return null;
+  const exporting = ex?.status === "running" || ex?.status === "queued";
   return (
     <div className="pt-next">
       <div className="row">
-        {promoted ? <span className="pt-tag ok">In use for this task</span> : (
-          <button className="btn primary" disabled={!passed || !!busy} title={passed ? "" : "The checks did not pass, so this model cannot be put in use"}
-            onClick={() => act("use", api.post.promote(job.id), "Now in use for this task")}>Use this model</button>
+        {promoted ? <span className="pt-tag ok">In use for this skill</span> : (
+          <button className="btn primary" disabled={!passed || !!busy} onClick={() => act("use", api.post.promote(job.id), "The model is now in use for this skill")}>Use this model</button>
         )}
-        <button className="btn" disabled={!!busy || ex?.status === "running" || ex?.status === "queued"} onClick={() => act("export", api.post.export(job.id), "Export started")}>
-          {ex?.status === "running" || ex?.status === "queued" ? "Exporting…" : ex?.status === "done" ? "Export again" : "Export as GGUF"}
+        <button className="btn" disabled={!!busy || exporting} onClick={() => act("export", api.post.export(job.id), "The export started")}>
+          {exporting ? "Exporting…" : ex?.status === "done" ? "Export again" : "Export as GGUF"}
         </button>
         <button className="btn" onClick={onCompare}>Compare in chat</button>
       </div>
-      {!passed && <div className="muted small">Use this model is off because the checks did not pass. You can still export it or chat with it.</div>}
-      {ex && ex.status === "done" && ex.result && (
-        <div className="pt-export">
-          <div><b>GGUF file</b> <span className="mono small">{ex.result.gguf}</span> <span className="muted small">· {ex.result.gb} GB · {ex.result.outtype} · {ex.result.converter}</span></div>
-          {ex.result.ollama ? (
-            <>
-              <div className="small">In Ollama as <span className="mono">{ex.result.ollama}</span>. Run it: <span className="mono">ollama run {ex.result.ollama}</span></div>
-              {ex.result.ollama_reply && <div className="small"><span className="muted">Check, asked through Ollama: </span>{ex.result.ollama_prompt} → <span className="mono">{ex.result.ollama_reply.slice(0, 200)}</span></div>}
-            </>
-          ) : <div className="muted small">Ollama is not running, so the file was not loaded into it. LM Studio and llama.cpp can open the file directly.</div>}
+      {!passed && !promoted && <div className="pt-note">You cannot use this model because a check failed. You can still export it or chat with it.</div>}
+    </div>
+  );
+}
+
+type Ev = { title: string; when?: string; state: "ok" | "bad" | "now" | ""; body?: React.ReactNode };
+const Num = ({ a, b, good }: { a: string; b: string; good: boolean | null }) => (
+  <><b className="jn">{a}</b> to <b className={`jn ${good == null ? "" : good ? "up" : "down"}`}>{b}</b></>
+);
+
+/** The job as a sequence of plain events, like an activity feed. */
+function events(job: PtJob, c: Check | null, promoted: boolean): Ev[] {
+  const out: Ev[] = [];
+  const where = job.where.includes("Mac") ? "this Mac" : "the 5090";
+  out.push({ title: "Started", when: clock(job.started), state: "", body: <>The lab started {job.method === "compress" ? "the compression" : `${job.iters} training steps`} on {where}.</> });
+  const losses = job.metrics.filter((x) => x.loss != null).map((x) => x.loss!);
+  const at = stage(job);
+  if (job.status === "failed") {
+    const line = (job.log.slice().reverse().find((l) => /busy|out of memory|Error|failed/i.test(l)) ?? "Open the log to see why.").replace(/^.*OutOfMemoryError.*$/, "The GPU ran out of memory because another job used it.");
+    out.push({ title: "Failed", state: "bad", body: line.slice(0, 240) });
+    return out;
+  }
+  if (losses.length > 1) out.push({ title: job.status === "running" && at === 0 ? "Training" : "Trained", state: job.status === "running" && at === 0 ? "now" : "ok", body: <>The loss went from <Num a={losses[0].toFixed(2)} b={losses[losses.length - 1].toFixed(2)} good={losses[losses.length - 1] < losses[0]} />.</> });
+  else if (job.status !== "done") out.push({ title: job.method === "compress" ? "Compressing" : "Training", state: "now", body: (job.log.slice().reverse().find((l) => l.startsWith("STATUS")) ?? "").replace(/^STATUS /, "").replace(/[{}"]/g, "").replace(/phase: \w+, msg: /, "") || "The job is in the queue." });
+  if (!c) {
+    if (at >= 1 && job.status !== "done") out.push({ title: "Testing", state: "now", body: "The lab tests the model on questions that it did not see in training." });
+    return out;
+  }
+  const better = c.tuned.task_score > c.base.task_score;
+  out.push({ title: "Tested on new questions", state: better ? "ok" : "bad", body: <>The skill score went from <Num a={pct(c.base.task_score)} b={pct(c.tuned.task_score)} good={better} />.</> });
+  const safe = c.tuned.refusal >= c.base.refusal - 0.1;
+  const ord = c.tuned.ordinary_refusal;
+  const ordOk = ord == null || ord <= (c.base.ordinary_refusal ?? 0) + 0.1;
+  out.push({ title: "Checked refusal", state: safe && ordOk ? "ok" : "bad", body: (
+    <>Harmful requests refused: <Num a={pct(c.base.refusal)} b={pct(c.tuned.refusal)} good={safe} />.{ord != null && <> Ordinary questions refused: <Num a={pct(c.base.ordinary_refusal ?? 0)} b={pct(ord)} good={ordOk} />.</>}</>
+  ) });
+  out.push({ title: c.old ? "Old tests" : c.ok ? "Passed" : "Failed", state: c.ok ? "ok" : "bad", body: c.why });
+  const ex = job.export;
+  if (ex?.status === "done" && ex.result) out.push({ title: "Exported", state: "ok", body: (
+    <>The lab wrote a GGUF file of {ex.result.gb} GB ({ex.result.outtype}). <span className="mono jp-path">{ex.result.gguf}</span>
+      {ex.result.ollama ? <> It is in Ollama as <span className="mono">{ex.result.ollama}</span>. To run it: <span className="mono">ollama run {ex.result.ollama}</span>.</> : <> Ollama did not run, so the lab did not load the file. LM Studio and llama.cpp can open it.</>}
+      {ex.result.ollama_reply && <span className="jp-quote">Test through Ollama. Q: {ex.result.ollama_prompt} A: {ex.result.ollama_reply.slice(0, 160)}</span>}</>
+  ) });
+  else if (ex && (ex.status === "running" || ex.status === "queued")) out.push({ title: "Exporting", state: "now", body: (ex.log.slice(-1)[0] ?? "").replace(/^STATUS /, "").replace(/[{}"]/g, "").replace(/phase: \w+, msg: /, "") || "The export is in the queue." });
+  else if (ex?.status === "failed") out.push({ title: "Export failed", state: "bad", body: ex.log.slice(-2).join(" ").slice(0, 300) });
+  if (promoted) out.push({ title: "In use", state: "ok", body: "This model is the one in use for this skill." });
+  return out;
+}
+
+/** A job: what it is on the left (properties, big numbers), what happened on the right (events). */
+function JobPanel({ job, ov, onCompare, reload }: { job: PtJob; ov: PtOverview; onCompare: () => void; reload: () => void }) {
+  const c = checks(job);
+  const promoted = ov.promoted?.[job.task]?.job === job.id;
+  const r = job.result as Record<string, any> | null;
+  const peak = Math.max(0, ...job.metrics.map((m) => m.peak_gb ?? 0), r?.tuned?.peak_gb ?? 0);
+  const losses = job.metrics.filter((x) => x.loss != null).map((x) => x.loss!);
+  const props: [string, string][] = [
+    ["Skill", taskTitle(job.task)],
+    ["Model", modelLabel(ov, job.model)],
+    ["Method", METHOD[job.method]?.title ?? job.method],
+    ["Where", job.where.includes("Mac") ? "This Mac" : "5090"],
+    ...(job.method !== "compress" ? [["Steps", String(job.iters)] as [string, string]] : []),
+    ...(peak ? [["Peak memory", `${peak.toFixed(2)} GB`] as [string, string]] : []),
+    ...(r?.seconds ? [["Time", `${Math.round(r.seconds)} s`] as [string, string]] : []),
+  ];
+  const verdict = !c ? (job.status === "failed" ? "Failed" : "Running") : job.method === "compress" ? (c.ok ? "Kept" : "Not kept") : c.old ? "Old tests" : c.ok ? "Passed" : "Failed";
+  return (
+    <div className="jp">
+      <div className="jp-side">
+        <div className="jp-id mono">{job.id}</div>
+        <h3 className="jp-title">{taskTitle(job.task)}</h3>
+        <div className="row">
+          <span className={`jp-pill ${!c ? (job.status === "failed" ? "bad" : "now") : c.ok ? "ok" : "bad"}`}>{verdict}</span>
+          <span className="grow" />
+          <button className="lnk small" onClick={() => navigate({ kind: "lab", run: job.run })}>Open the log</button>
         </div>
-      )}
-      {ex && ex.status === "failed" && <div className="pt-bad small">The export failed: {ex.log.slice(-2).join(" ").slice(0, 300)}</div>}
-      {ex && (ex.status === "running" || ex.status === "queued") && <div className="muted small">{ex.log.slice(-1)[0]?.replace(/^STATUS /, "") ?? "Starting…"}</div>}
+        <dl className="jp-props">{props.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+        {c && (
+          <div className="jp-big">
+            <div className="jp-cap">Skill score</div>
+            <div className="jp-val mono">{pct(c.base.task_score)} <span className="jp-arrow">→</span> {pct(c.tuned.task_score)}</div>
+            {losses.length > 1 && <Curve pts={losses} />}
+          </div>
+        )}
+        {!c && losses.length > 1 && <div className="jp-big"><div className="jp-cap">Loss</div><Curve pts={losses} /></div>}
+        {job.where.includes("Mac") && <NextSteps job={job} promoted={promoted} onCompare={onCompare} reload={reload} />}
+      </div>
+      <ol className="jp-feed">
+        {events(job, c, promoted).map((e, i) => (
+          <li key={i} className={`jp-ev ${e.state}`}>
+            <div className="jp-ev-head"><span className="jp-dot" /> <b>{e.title}</b>{e.when && <span className="jp-when">{e.when}</span>}</div>
+            {e.body && <div className="jp-ev-body">{e.body}</div>}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** Earlier jobs, grouped by day: a title line and one line of status and numbers. */
+function JobList({ jobs, sel, onPick, ov }: { jobs: PtJob[]; sel?: string; onPick: (id: string) => void; ov: PtOverview }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const yday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  const groups = new Map<string, PtJob[]>();
+  for (const j of jobs) {
+    const d = j.started.slice(0, 10);
+    const k = d === today ? "Today" : d === yday ? "Yesterday" : d;
+    groups.set(k, [...(groups.get(k) ?? []), j]);
+  }
+  return (
+    <div className="jl">
+      {[...groups].map(([day, js]) => (
+        <div key={day} className="jl-group">
+          <div className="jl-day">{day}</div>
+          {js.map((j) => {
+            const c = checks(j);
+            const st = !c ? (j.status === "failed" ? ["Failed", "bad"] : j.status === "done" ? ["Done", ""] : ["Running", "now"]) : c.old ? ["Old tests", "bad"] : j.method === "compress" ? (c.ok ? ["Kept", "ok"] : ["Not kept", "bad"]) : c.ok ? ["Passed", "ok"] : ["Failed", "bad"];
+            return (
+              <button key={j.id} className={`jl-row ${j.id === sel ? "on" : ""}`} onClick={() => onPick(j.id)}>
+                <span className={`jl-dot ${st[1]}`} />
+                <span className="jl-main">
+                  <span className="jl-title">{taskTitle(j.task)}, {METHOD[j.method]?.title ?? j.method}, {modelLabel(ov, j.model)}</span>
+                  <span className="jl-meta"><b className={st[1]}>{st[0]}</b>{c ? `, ${pct(c.base.task_score)} to ${pct(c.tuned.task_score)}` : ""}, {clock(j.started)}{ov.promoted?.[j.task]?.job === j.id ? ", in use" : ""}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -208,39 +336,34 @@ export function PostTrainView({ refresh }: { refresh: number }) {
   const [allModels, setAllModels] = useState(false);
   const [pair, setPair] = useState({ left: "mlx-community/Qwen3-0.6B-4bit", right: "mlx-community/Llama-3.2-1B-Instruct-4bit" });
   const chatRef = useRef<HTMLElement>(null);
+  const jobRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(() => api.post.overview().then((o) => { setOv(o); setErr(null); }).catch((e) => setErr(errorMessage(e))), []);
   useEffect(() => { void load(); }, [load, refresh]);
-  const running = ov?.jobs.some((j) => j.status === "running" || j.status === "queued");
+  const active = ov?.jobs.some((j) => j.status === "running" || j.status === "queued" || (j.export && (j.export.status === "running" || j.export.status === "queued")));
   useEffect(() => {
-    if (!running) return;
+    if (!active) return;
     const t = window.setInterval(() => void load(), 3000);
     return () => window.clearInterval(t);
-  }, [running, load]);
-  const exporting = ov?.jobs.some((j) => j.export && (j.export.status === "running" || j.export.status === "queued"));
-  useEffect(() => {
-    if (!exporting) return;
-    const t = window.setInterval(() => void load(), 4000);
-    return () => window.clearInterval(t);
-  }, [exporting, load]);
+  }, [active, load]);
 
   if (err) return <EmptyState title="The lab is not available" hint={err} />;
   if (!ov) return <EmptyState title="Loading the lab" />;
   const job = ov.jobs.find((j) => j.id === sel) ?? ov.jobs[0];
-  const c = job ? checks(job) : null;
   const where = (m: PtOverview["models"][number]) => {
-    if (m.engine !== "mlx") return "on the 5090 · robot arm only";
-    const f = m.settings?.[method];
-    if (!f?.fits) return `needs ~${f?.gb ?? "?"} GB, above this Mac's ${ov.cap_gb} GB cap`;
-    return `on this Mac · ~${f.gb} GB` + (f.seq < 1024 || f.batch < 2 ? ` · ${f.batch === 1 ? "1 example at a time" : ""}${f.seq < 1024 ? `, cut at ${f.seq} tokens` : ""}` : "");
+    if (m.engine !== "mlx") return "5090, robot arm only";
+    const f = m.by_task?.[task.startsWith("custom:") ? "custom" : task]?.[method] ?? m.settings?.[method];
+    if (!f?.fits) return `Needs ${f?.gb ?? "?"} GB, more than the ${ov.cap_gb} GB limit`;
+    return `This Mac, ${f.gb} GB` + (f.batch < 2 ? ", batch 1" : "") + (f.seq < 1024 ? `, ${f.seq} tokens` : "");
   };
-  const usable = (m: PtOverview["models"][number]) => m.engine === "mlx" ? !!m.fits?.[method] : task === "arm" && method === "sft";
+  const usable = (m: PtOverview["models"][number]) => m.engine === "mlx" ? !!(m.by_task?.[task.startsWith("custom:") ? "custom" : task]?.[method] ?? m.settings?.[method])?.fits : task === "arm" && method === "sft";
   const cur = ov.models.find((m) => m.id === model);
+  const pick = (id: string) => { setSel(id); window.setTimeout(() => jobRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); };
 
   const start = (o?: { task: string; method: string; model: string; iters: number }) => {
     setBusy(true);
     api.post.start({ task: o?.task ?? task, method: o?.method ?? method, model: o?.model ?? model, iters: o?.iters ?? iters, safety })
-      .then((j) => { setSel(j.id); toast("Training started"); return load(); })
+      .then((j) => { pick(j.id); toast("Training started"); return load(); })
       .catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false));
   };
   const compare = (j: PtJob) => {
@@ -249,159 +372,112 @@ export function PostTrainView({ refresh }: { refresh: number }) {
   };
   const shown = ov.models.filter((m) => allModels || m.top || m.id === model);
   const inUse = Object.entries(ov.promoted ?? {});
+  const customNoChecker = method === "grpo" && task.startsWith("custom:");
 
   return (
     <div className="pt2">
       <header className="pt2-head">
         <h2>Post-train a model</h2>
-        <p className="muted">Post-training teaches a model one more skill. The lab trains the model, tests it on new questions, and tells you if it got better.</p>
+        <p>Teach a model one new skill. The lab trains the model, tests it on questions that it did not see, and tells you if you can use it.</p>
         <div className="row">
           <button className="btn primary" disabled={busy} onClick={() => { const o = { task: "arm", method: "sft", model: "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16", iters: 75 }; setTask(o.task); setMethod(o.method); setModel(o.model); start(o); }}>
-            Quick start: teach a 4B NVIDIA model to plan robot-arm moves
+            Train the arm planner
           </button>
-          <span className="muted small">Runs on the 5090. About 10 minutes.</span>
+          <span className="pt-note">Nemotron 3 Nano 4B on the 5090, about 10 min</span>
         </div>
-        <div className="muted small">The small models on this Mac are good for learning the steps. They are too small to learn a skill well and stay safe.</div>
+        <p className="pt-note">Models on this Mac are small. Use them to learn the steps. Train a model that you will use on the 5090.</p>
         {inUse.length > 0 && (
           <div className="pt-inuse">
             <b>In use</b>
-            {inUse.map(([t, p]) => <span key={t}>{taskTitle(t)}: {modelLabel(ov, p.model)} + {p.method.toUpperCase()}{p.score != null ? ` · ${pct(p.score)}` : ""}</span>)}
+            {inUse.map(([t, p]) => <span key={t}>{taskTitle(t)}: {modelLabel(ov, p.model)} + {p.method.toUpperCase()}{p.score != null ? `, skill score ${pct(p.score)}` : ""}</span>)}
           </div>
         )}
       </header>
 
-      <section className="pt2-step">
-        <h3><span className="pt-n">1</span> What should it learn?</h3>
-        <div className="pt-opts">
-          {["code", "gsm8k", "arm"].map((t) => <Option key={t} on={task === t} onClick={() => setTask(t)} title={SKILL[t].title} line={SKILL[t].line} foot={`Checked by ${SKILL[t].check}`} />)}
-          <Option on={task.startsWith("custom:")} onClick={() => setTask(ov.datasets[0] ? `custom:${ov.datasets[0].name}` : "custom:")} title="Your data" line="Upload JSONL or CSV pairs." foot="Checked by word overlap with your answers (weak)" />
-        </div>
-        {task.startsWith("custom:") && (
-          <div className="pt-upload">
-            <div className="row">
-              <label className="btn sm">Upload a file<input type="file" accept=".jsonl,.json,.csv" hidden onChange={(e) => {
-                const f = e.target.files?.[0]; if (!f) return;
-                api.post.upload(f).then((d) => { toast(`${d.rows} rows, format: ${d.format}`); setTask(`custom:${d.name}`); return load(); }).catch((er) => toast(errorMessage(er), "error"));
-                e.target.value = "";
-              }} /></label>
-              {ov.datasets.map((d) => <button key={d.name} className={`btn sm${task === `custom:${d.name}` ? " primary" : ""}`} onClick={() => setTask(`custom:${d.name}`)}>{d.name} · {d.rows} rows</button>)}
-            </div>
-            <div className="muted small">Rows can be chat messages, or pairs: prompt/completion, instruction/output, question/answer, or two CSV columns. The lab keeps 10% to test on.</div>
-            {(() => {
-              const d = ov.datasets.find((x) => task === `custom:${x.name}`);
-              return d && (
-                <div className="pt-data">
-                  <div className="muted small">Format found: {d.format}. First rows:</div>
-                  {d.preview.map((r, i) => (
-                    <div key={i} className="pt-sft">
-                      <div className="pt-sft-in"><pre>{r.messages.slice(0, -1).map((m) => m.content).join("\n")}</pre></div>
-                      <div className="pt-sft-out"><pre>{r.messages[r.messages.length - 1].content}</pre></div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
+      <div className="ps-list">
+        <Step n="1" title="Skill" note="What the model learns, and how the lab checks the answers.">
+          <div className="pt-opts">
+            {["code", "gsm8k", "arm"].map((t) => <Option key={t} on={task === t} onClick={() => setTask(t)} title={SKILL[t].title} line={SKILL[t].line} foot={`Check: ${SKILL[t].check}`} />)}
+            <Option on={task.startsWith("custom:")} onClick={() => setTask(ov.datasets[0] ? `custom:${ov.datasets[0].name}` : "custom:")} title="Your data" line="Your own JSONL or CSV file." foot="Check: word overlap with your answers (weak)" />
           </div>
-        )}
-      </section>
-
-      <section className="pt2-step">
-        <h3><span className="pt-n">2</span> Which model?</h3>
-        <div className="pt-opts">
-          {shown.map((m) => <Option key={m.id} on={model === m.id} disabled={!usable(m)} onClick={() => setModel(m.id)} title={m.label} line={where(m)} foot={m.maker} />)}
-        </div>
-        <button className="lnk small pt-allm" onClick={() => setAllModels((v) => !v)}>{allModels ? "Show fewer models" : `Show all ${ov.models.length} models`}</button>
-      </section>
-
-      <section className="pt2-step">
-        <h3><span className="pt-n">3</span> How should it learn?</h3>
-        <div className="pt-opts">
-          {["sft", "grpo"].map((x) => <Option key={x} on={method === x} disabled={x === "grpo" && task.startsWith("custom:")} onClick={() => setMethod(x)} title={METHOD[x].title} line={x === "grpo" && task.startsWith("custom:") ? "Needs a checker. Your data has none." : METHOD[x].line} />)}
-        </div>
-        <div className="row">
-          <button className="btn primary" disabled={busy || !cur || !usable(cur) || task === "custom:" || (method === "grpo" && task.startsWith("custom:"))} onClick={() => start()}>{busy ? "Starting…" : "Start training"}</button>
-          <details className="pt-more">
-            <summary className="muted small">Settings</summary>
-            <label className="small">Steps <input className="input sm arm-seed" type="number" min={4} value={iters} onChange={(e) => setIters(Number(e.target.value) || 20)} /></label>
-            {task === "arm" && <label className="small arm-check"><input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> Also teach it to refuse unsafe arm requests</label>}
-          </details>
-        </div>
-      </section>
-
-      <section className="pt2-step">
-        <h3><span className="pt-n">4</span> Compress safely (optional)</h3>
-        <div className="muted small">Pruning sets most weights to zero. It keeps the skill well, but it can remove refusal. "Keep refusal" adds harmful requests and the model's own refusals to the calibration set (Lab Notebook PRUNE-2: refusal stayed at 93-98% at 60%). Today this works on the Qwen3 1.7B arm planner, on the 5090, in about 15 minutes.</div>
-        <div className="row">
-          <div className="seg">{[0.5, 0.6].map((v) => <button key={v} className={`btn sm${sparsity === v ? " primary" : ""}`} onClick={() => setSparsity(v)}>{v * 100}% zero</button>)}</div>
-          <label className="small arm-check"><input type="checkbox" checked={keepSafe} onChange={(e) => setKeepSafe(e.target.checked)} /> Keep refusal</label>
-          <button className="btn primary" disabled={busy} onClick={() => { setBusy(true); api.post.compress(sparsity, keepSafe).then((j) => { setSel(j.id); toast("Compression started"); return load(); }).catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false)); }}>Compress</button>
-        </div>
-      </section>
-
-      {!task.startsWith("custom:") && <DataView task={task} model={model} />}
-
-      {job && (
-        <section className="pt2-step pt2-run">
-          <div className="row">
-            <h3>{taskTitle(job.task)} · {METHOD[job.method]?.title ?? job.method} · {job.model.split("/").pop()}</h3>
-            <span className="grow" />
-            <button className="lnk small" onClick={() => navigate({ kind: "lab", run: job.run })}>log</button>
-          </div>
-          <div className="pt-flow">
-            {[job.method === "compress" ? "1 Set weights to zero" : "1 Train", "2 Test on new questions", "3 Decide"].map((s, i) => {
-              const at = job.status === "failed" ? -1 : stage(job);
-              return <span key={s} className={`pt-flow-s ${at > i || (at === 2 && i === 2) ? "done" : at === i ? "now" : ""}`}>{s}</span>;
-            })}
-          </div>
-          {job.method !== "compress" && <Curve pts={job.metrics.filter((x) => x.loss != null).map((x) => x.loss!)} />}
-          {job.status === "failed" && (
-            <div className="pt-bad">
-              The job failed. {(job.log.slice().reverse().find((l) => /busy|out of memory|Error|failed/i.test(l)) ?? "Open the log.").replace(/^.*OutOfMemoryError.*$/, "The GPU ran out of memory (another job was using it).").slice(0, 240)}
+          {task.startsWith("custom:") && (
+            <div className="pt-upload">
+              <div className="row">
+                <label className="btn sm">Upload a file<input type="file" accept=".jsonl,.json,.csv" hidden onChange={(e) => {
+                  const f = e.target.files?.[0]; if (!f) return;
+                  api.post.upload(f).then((d) => { toast(`${d.rows} rows, format: ${d.format}`); setTask(`custom:${d.name}`); return load(); }).catch((er) => toast(errorMessage(er), "error"));
+                  e.target.value = "";
+                }} /></label>
+                {ov.datasets.map((d) => <button key={d.name} className={`btn sm${task === `custom:${d.name}` ? " primary" : ""}`} onClick={() => setTask(`custom:${d.name}`)}>{d.name}, {d.rows} rows</button>)}
+              </div>
+              <div className="pt-note">Each row is a chat, or a pair: prompt and completion, instruction and output, question and answer, or 2 CSV columns. The lab keeps 10% of the rows for the test.</div>
+              {(() => {
+                const d = ov.datasets.find((x) => task === `custom:${x.name}`);
+                return d && (
+                  <div className="pt-data">
+                    <div className="pt-note">Format: {d.format}. The first rows:</div>
+                    {d.preview.map((r, i) => (
+                      <div key={i} className="pt-sft">
+                        <div className="pt-sft-in"><pre>{r.messages.slice(0, -1).map((m) => m.content).join("\n")}</pre></div>
+                        <div className="pt-sft-out"><pre>{r.messages[r.messages.length - 1].content}</pre></div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
-          {c ? (
-            <>
-              <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{job.method === "compress" ? (c.ok ? "Kept. You can use the compressed model." : "Not kept. Do not use the compressed model.") : c.old ? "Not checked with today's tests." : c.ok ? "Better. You can use this model." : "Not better. Do not use this model."}</div>
-              <div className="small">{c.why}</div>
-              <div className="pt-nums">
-                <div><div className="muted small">Skill score on new questions</div><div className="big">{pct(c.base.task_score)} → {pct(c.tuned.task_score)}</div></div>
-                <div><div className="muted small">Refuses harmful requests</div><div className="big">{pct(c.base.refusal)} → {pct(c.tuned.refusal)}</div></div>
-                {c.tuned.ordinary_refusal != null && <div><div className="muted small">Refuses ordinary questions (lower is better)</div><div className="big">{pct(c.base.ordinary_refusal ?? 0)} → {pct(c.tuned.ordinary_refusal)}</div></div>}
-              </div>
-              <div className="muted small">{job.method === "compress" ? "Left number: before compression. Right number: after compression." : "Left number: before training. Right number: after training."}</div>
-              {job.where.includes("Mac") && <NextSteps job={job} promoted={ov.promoted?.[job.task]?.job === job.id} onCompare={() => compare(job)} reload={load} />}
-            </>
-          ) : job.status !== "failed" && <div className="muted small">{stage(job) === 0 ? "The model is training." : "The lab is testing the model on new questions."}</div>}
-        </section>
+        </Step>
+
+        <Step n="2" title="Model" note={`A model on this Mac must fit in ${ov.cap_gb} GB of memory. The lab sets the batch size and the length.`}>
+          <div className="pt-opts">
+            {shown.map((m) => <Option key={m.id} on={model === m.id} disabled={!usable(m)} onClick={() => setModel(m.id)} title={m.label} line={where(m)} foot={m.maker} />)}
+          </div>
+          <button className="lnk small pt-allm" onClick={() => setAllModels((v) => !v)}>{allModels ? "Show fewer models" : `Show all ${ov.models.length} models`}</button>
+        </Step>
+
+        <Step n="3" title="Method" note="Start with SFT. Use GRPO after SFT.">
+          <div className="pt-opts">
+            {["sft", "grpo"].map((x) => <Option key={x} on={method === x} disabled={x === "grpo" && task.startsWith("custom:")} onClick={() => setMethod(x)} title={METHOD[x].title} line={x === "grpo" && task.startsWith("custom:") ? "Not available. Your data has no checker." : METHOD[x].line} />)}
+          </div>
+          <div className="row">
+            <button className="btn primary" disabled={busy || !cur || !usable(cur) || task === "custom:" || customNoChecker} onClick={() => start()}>{busy ? "Starting…" : "Start training"}</button>
+            <details className="pt-more">
+              <summary className="pt-note">Settings</summary>
+              <label className="small">Steps <input className="input sm arm-seed" type="number" min={4} value={iters} onChange={(e) => setIters(Number(e.target.value) || 20)} /></label>
+              {task === "arm" && <label className="small arm-check"><input type="checkbox" checked={safety} onChange={(e) => setSafety(e.target.checked)} /> Teach it to refuse unsafe arm requests</label>}
+            </details>
+          </div>
+        </Step>
+
+        <Step n="4" title="Compress" note="Optional. Set most weights to zero, and keep the skill and the refusal.">
+          <p className="pt-note">This works for 1 model today: the Qwen3 1.7B arm planner on the 5090, about 15 min. Pruning can remove refusal. "Keep refusal" adds harmful requests and the model's own refusals to the calibration data. In the PRUNE-2 test, refusal stayed at 93% to 98% with 60% of the weights at zero.</p>
+          <div className="row">
+            <div className="seg">{[0.5, 0.6].map((v) => <button key={v} className={`btn sm${sparsity === v ? " primary" : ""}`} onClick={() => setSparsity(v)}>{v * 100}% zero</button>)}</div>
+            <label className="small arm-check"><input type="checkbox" checked={keepSafe} onChange={(e) => setKeepSafe(e.target.checked)} /> Keep refusal</label>
+            <button className="btn primary" disabled={busy} onClick={() => { setBusy(true); api.post.compress(sparsity, keepSafe).then((j) => { pick(j.id); toast("Compression started"); return load(); }).catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false)); }}>Compress</button>
+          </div>
+        </Step>
+
+        {!task.startsWith("custom:") && <DataView task={task} model={model} />}
+      </div>
+
+      {job && (
+        <div ref={jobRef}>
+          <JobPanel job={job} ov={ov} onCompare={() => compare(job)} reload={load} />
+        </div>
       )}
 
-      <section className="pt2-step" ref={chatRef}>
-        <h3>Chat with two models</h3>
-        <div className="muted small">Pick a base model or a model you trained on each side. Both get the same messages. This runs on this Mac, one model at a time.</div>
-        <CompareChat left={pair.left} right={pair.right} onPick={(side, id) => setPair((p) => ({ ...p, [side]: id }))} />
-      </section>
-
-      {ov.jobs.length > 1 && (
-        <details className="pt2-step">
-          <summary className="muted small">Earlier jobs ({ov.jobs.length})</summary>
-          <table className="arm-grid pt-jobs">
-            <tbody>
-              {ov.jobs.map((j) => {
-                const cc = checks(j);
-                return (
-                  <tr key={j.id} className={j.id === job?.id ? "sel" : ""} onClick={() => setSel(j.id)}>
-                    <td className="mono">{j.started.replace("T", " ").slice(5, 16)}</td>
-                    <td>{taskTitle(j.task)} · {j.method}</td>
-                    <td className="mono">{j.model.split("/").pop()}</td>
-                    <td>{cc ? `${pct(cc.base.task_score)} → ${pct(cc.tuned.task_score)}` : j.status}</td>
-                    <td className={cc ? (cc.ok ? "ok" : "bad") : ""}>{cc ? (cc.old ? "old tests" : cc.ok ? "better" : "not better") : ""}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </details>
-      )}
+      <div className="ps-list">
+        <Step title="Chat" note="Ask 2 models the same message. The models run on this Mac, one at a time." innerRef={chatRef}>
+          <CompareChat left={pair.left} right={pair.right} onPick={(side, id) => setPair((p) => ({ ...p, [side]: id }))} />
+        </Step>
+        {ov.jobs.length > 1 && (
+          <Step title="Jobs" note={`${ov.jobs.length} jobs. Select one to see it above.`}>
+            <JobList jobs={ov.jobs} sel={job?.id} onPick={pick} ov={ov} />
+          </Step>
+        )}
+      </div>
     </div>
   );
 }

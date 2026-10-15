@@ -10,10 +10,10 @@ import { useToast } from "../components/Toast";
 const KINDS = ["note", "preference", "pair", "rating", "decision", "taste", "feedback", "idea", "link"];
 // what the form offers; older kinds stay readable and filterable
 const ADD: { kind: string; label: string; hint: string }[] = [
-  { kind: "note", label: "Note", hint: "A thought, a decision, a link, or how you like things done." },
-  { kind: "pair", label: "Good answer", hint: "A question and the answer you want a model to give. Exports as SFT data." },
-  { kind: "preference", label: "A is better than B", hint: "Two answers to the same question, and which one you prefer. Exports as DPO data." },
-  { kind: "rating", label: "Rating", hint: "A score from 1 to 5 for something, with a note on why." },
+  { kind: "note", label: "Note", hint: "A thought, a decision, a link, or how you like a task done." },
+  { kind: "pair", label: "Good answer", hint: "A question and the answer that you want from a model. The export uses it as SFT data." },
+  { kind: "preference", label: "A is better than B", hint: "2 answers to the same question, and the one that you prefer. The export uses it as DPO data." },
+  { kind: "rating", label: "Rating", hint: "A score from 1 to 5, with a note that tells why." },
 ];
 
 export function TracesView({ refresh }: { refresh: number }) {
@@ -84,7 +84,7 @@ export function TracesView({ refresh }: { refresh: number }) {
     <div className={`traces ${drag ? "cl-drop" : ""}`} onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={onDrop}>
       <div className="cl-head">
         <h2>Collect</h2>
-        <p>Save what you know, prefer and like. Later, export it as training data for the Post-train tab. Files can be dropped anywhere on this page.</p>
+        <p>Save notes, good answers and preferences. Later, export them as training data for the Post-train tab. To add a file, drop it on this page.</p>
       </div>
 
       <div className="cl-card">
@@ -158,7 +158,7 @@ export function TracesView({ refresh }: { refresh: number }) {
             {r.file && <div className="trace-pair"><span className="lbl">File</span>{r.file}</div>}
           </li>
         ))}
-        {rows.length === 0 && <li className="cl-hint">{q || filterKind ? "Nothing matches." : "Nothing saved yet. Write a note above, or drop a file on this page."}</li>}
+        {rows.length === 0 && <li className="cl-hint">{q || filterKind ? "Nothing matches." : "Nothing is saved. Write a note above, or drop a file on this page."}</li>}
       </ul>
     </div>
   );

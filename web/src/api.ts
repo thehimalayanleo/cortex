@@ -98,7 +98,8 @@ export interface PtPreview { mode: "preview"; task: string; model: string; secon
   rl: { prompt: string; mean: number; std: number; rollouts: { completion: string; reward: number; advantage: number; tests?: { test: string; passed: boolean }[] }[] }[] }
 export interface PtOverview { tasks: { id: string; label: string; verifier: string; safety: boolean }[]; methods: { id: string; label: string; doc: string }[];
   models: { id: string; label: string; maker?: string; top?: boolean; engine: string; tasks?: string[]; estimate_gb: Record<string, number> | null; fits: Record<string, boolean> | null;
-    settings?: Record<string, { batch: number; seq: number; gb: number; fits: boolean }> }[]; cap_gb: number; jobs: PtJob[];
+    settings?: Record<string, { batch: number; seq: number; gb: number; fits: boolean }>;
+    by_task?: Record<string, Record<string, { batch: number; seq: number; gb: number; fits: boolean }>> }[]; cap_gb: number; jobs: PtJob[];
   datasets: PtDataset[]; promoted: Record<string, PtPromoted> }
 export interface PtPromoted { job: string; model: string; adapter: string; method: string; score: number | null; when: string }
 export interface PtExport { run: string; status: string; log: string[]; result: { gguf: string; gb: number; outtype: string; converter: string; ollama: string | null; ollama_prompt?: string; ollama_reply?: string; seconds: number } | null }

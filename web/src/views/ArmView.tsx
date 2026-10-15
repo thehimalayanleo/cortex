@@ -22,7 +22,7 @@ function hull(pts: P3[]): P3[] {
   return lo.slice(0, -1).concat(up.slice(0, -1));
 }
 const pct = (v?: number) => (v == null ? "–" : `${Math.round(v * 100)}%`);
-const MODE_LABEL: Record<string, string> = { oracle: "oracle (ceiling)", joints: "model writes joint angles", skills: "skill program, no repair", "skills+repair": "skill program + simulator repair" };
+const MODE_LABEL: Record<string, string> = { oracle: "Perfect plan (upper limit)", joints: "Model writes joint angles", skills: "Skill program, 1 try", "skills+repair": "Skill program, up to 3 tries" };
 
 const LABELS: Record<string, string> = { shoulder_pan: "pan", shoulder_lift: "lift", elbow_flex: "elbow", wrist_flex: "wrist", wrist_roll: "roll", gripper: "grip" };
 
@@ -286,7 +286,7 @@ export function ArmView({ refresh }: { refresh: number }) {
                 <button className="btn sm primary" disabled={keyIn.trim().length < 10} onClick={() => act(api.arm.setNebiusKey(keyIn.trim()), (n) => { setNeb(n); setKeyIn(""); toast(n.connected ? "Token Factory connected" : n.error ?? "Key saved, but no models listed", n.connected ? undefined : "error"); })}>Connect</button>
               </div>
             )}
-            {neb && !neb.connected && <div className="muted small">Until then plans come from {neb.planner ?? "the app's chat model"}. The key stays on this machine (~/.config/cortex/nebius.key, mode 600).</div>}
+            {neb && !neb.connected && <div className="muted small">Without a key, plans come from {neb.planner ?? "the chat model of the app"}. The key stays on this Mac (~/.config/cortex/nebius.key, mode 600).</div>}
           </div>
           <div className="arm-card">
             <div className="row">
@@ -305,7 +305,7 @@ export function ArmView({ refresh }: { refresh: number }) {
               )}
             </div>
             <div className="muted small">
-              {st.ports.length ? `${st.ports.length} serial port${st.ports.length > 1 ? "s" : ""} seen on ${st.host}.` : `No serial port seen on ${st.host}; plug the SO-ARM101's USB in (or run the bridge on the GPU box) and this list fills in.`} The bridge is an ordinary run: same log, metrics and stop button.
+              {st.ports.length ? `${st.ports.length} serial port${st.ports.length > 1 ? "s" : ""} seen on ${st.host}.` : `${st.host} sees no serial port. Connect the USB cable of the SO-ARM101, or run the bridge on the GPU box.`} The bridge is an ordinary run: same log, metrics and stop button.
             </div>
           </div>
           <div className="arm-card">
@@ -321,10 +321,10 @@ export function ArmView({ refresh }: { refresh: number }) {
               {Object.keys(st.poses).map((p) => (
                 <button key={p} className="btn sm" onClick={() => act(api.arm.goto(p))} title={JSON.stringify(st.poses[p])}>{p}</button>
               ))}
-              <button className="btn sm" onClick={() => act(api.arm.stop())}>stop</button>
+              <button className="btn sm" onClick={() => act(api.arm.stop())}>Stop</button>
             </div>
             <div className="row">
-              <input className="input sm" placeholder="save current as pose…" value={poseName} onChange={(e) => setPoseName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && poseName.trim()) act(api.arm.savePose(poseName.trim()), () => setPoseName("")); }} />
+              <input className="input sm" placeholder="Name this pose and press Enter" value={poseName} onChange={(e) => setPoseName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && poseName.trim()) act(api.arm.savePose(poseName.trim()), () => setPoseName("")); }} />
             </div>
           </div>
         </div>
@@ -335,7 +335,7 @@ export function ArmView({ refresh }: { refresh: number }) {
             <b>Give it a task</b>
             <span className="grow" />
             <div className="seg" role="group" aria-label="Planner">
-              {(["skills", "joints"] as const).map((m) => <button key={m} className={`btn sm${mode === m ? " primary" : ""}`} onClick={() => setMode(m)} title={MODE_LABEL[m]}>{m === "skills" ? "skill program" : "joint angles"}</button>)}
+              {(["skills", "joints"] as const).map((m) => <button key={m} className={`btn sm${mode === m ? " primary" : ""}`} onClick={() => setMode(m)} title={MODE_LABEL[m]}>{m === "skills" ? "Skill program" : "Joint angles"}</button>)}
             </div>
           </div>
           <div className="row">
@@ -346,8 +346,8 @@ export function ArmView({ refresh }: { refresh: number }) {
           <div className="row muted small">
             <span>scene</span>
             <input className="input sm arm-seed" type="number" min={1} value={seed} onChange={(e) => setSeed(Number(e.target.value) || 1)} aria-label="Scene seed" />
-            <button className="btn sm" onClick={() => act(api.arm.resetWorld(seed, false), () => setPlan(null))}>reset scene</button>
-            <button className="btn sm" onClick={() => act(api.arm.resetWorld(seed, true), () => setPlan(null))} title="adds a purple block 47 cm out, beyond reach">+ unreachable block</button>
+            <button className="btn sm" onClick={() => act(api.arm.resetWorld(seed, false), () => setPlan(null))}>New scene</button>
+            <button className="btn sm" onClick={() => act(api.arm.resetWorld(seed, true), () => setPlan(null))} title="Adds a purple block 47 cm from the base. The arm cannot reach it.">Add a block out of reach</button>
             <span className="grow" />
             <span>{st.planner}</span>
           </div>
@@ -394,12 +394,12 @@ export function ArmView({ refresh }: { refresh: number }) {
               {plan.note && <div className="muted small">{plan.note}</div>}
             </div>
           )}
-          {offline && <div className="muted small">Start the simulator or connect the arm to run plans.</div>}
+          {offline && <div className="muted small">To run a plan, start the simulator or connect the arm.</div>}
         </div>
         <div className="arm-card">
           <div className="row">
             <b>Episodes</b>
-            <span className="muted small">LeRobot-style frames: joints at {10} Hz with the task text</span>
+            <span className="muted small">Each episode keeps the joint angles 10 times a second, with the task text (LeRobot format).</span>
             <span className="grow" />
             {st.recording ? (
               <button className="btn sm danger" onClick={() => act(api.arm.recordStop(), () => api.arm.episodes().then(setEps))}>Stop recording</button>
@@ -411,13 +411,13 @@ export function ArmView({ refresh }: { refresh: number }) {
             )}
           </div>
           {eps.length === 0 ? (
-            <div className="muted small">No episodes yet. Record while you move the sliders, run a plan, or teleoperate; play one back to see the arm repeat it.</div>
+            <div className="muted small">No episodes. Click Record, then move the sliders or run a plan. Play an episode to make the arm do it again.</div>
           ) : (
             <div className="arm-episodes">
               {eps.map((e) => (
                 <div key={e.id} className="ep">
                   <span className="mono small">{e.id}</span>
-                  <span className="grow">{e.task || <span className="muted">no task text</span>}</span>
+                  <span className="grow">{e.task || <span className="muted">No task text</span>}</span>
                   <span className="muted small">{e.frames} frames{e.seconds ? ` · ${e.seconds}s` : ""} · {e.mode}</span>
                   <button className="btn sm" disabled={offline} onClick={() => { setTrail([]); act(api.arm.play(e.id)); }}>play</button>
                   <button className="btn sm" onClick={() => act(api.arm.removeEpisode(e.id), () => setEps((l) => l.filter((x) => x.id !== e.id)))}>delete</button>
@@ -430,9 +430,9 @@ export function ArmView({ refresh }: { refresh: number }) {
       <div className="arm-card">
         <div className="row">
           <b>Train the planner</b>
-          <span className="muted small">LoRA on simulator-verified programs for Nemotron 3 Nano 4B, on the 5090; then it becomes the planner</span>
+          <span className="muted small">The 5090 trains Nemotron 3 Nano 4B (LoRA) on plans that the simulator accepted. The new model then makes the plans.</span>
           <span className="grow" />
-          <label className="muted small arm-check"><input type="checkbox" checked={trainSafety} onChange={(e) => setTrainSafety(e.target.checked)} /> safety examples</label>
+          <label className="muted small arm-check"><input type="checkbox" checked={trainSafety} onChange={(e) => setTrainSafety(e.target.checked)} /> Add safety examples</label>
           <span className="muted small">seed</span>
           <input className="input sm arm-seed" type="number" min={1} value={trainSeed} onChange={(e) => setTrainSeed(Number(e.target.value) || 1)} aria-label="Training seed" />
           <button className="btn sm primary" disabled={train?.status === "running" || train?.status === "queued"}
@@ -450,20 +450,20 @@ export function ArmView({ refresh }: { refresh: number }) {
         {train?.result ? (
           <div className="arm-bench">
             {([
-              ["plans that work on new tables", train.result.base.plan_success, train.result.tuned.plan_success, true],
-              ["refuses unsafe arm requests (for a safety reason)", null, train.result.tuned.unsafe_arm_safe_refusal ?? null, true],
-              ["refuses harmful chat requests", train.result.base.advbench_refusal, train.result.tuned.advbench_refusal, true],
-              ["refuses ordinary tasks that mention people", null, train.result.tuned.benign_people_refusal ?? null, false],
+              ["Plans that work on new tables", train.result.base.plan_success, train.result.tuned.plan_success, true],
+              ["Refuses unsafe arm requests, with a safety reason", null, train.result.tuned.unsafe_arm_safe_refusal ?? null, true],
+              ["Refuses harmful chat requests", train.result.base.advbench_refusal, train.result.tuned.advbench_refusal, true],
+              ["Refuses ordinary tasks that mention people", null, train.result.tuned.benign_people_refusal ?? null, false],
             ] as [string, number | null, number | null, boolean][]).map(([label, before, after, upGood]) => (
               <div key={label} className={`bm${label.startsWith("plans") ? " hero" : ""}`}>
                 <div className="big">{pct(after ?? undefined)}</div>
                 <div className="small">{label}</div>
-                <div className="muted small">{before != null ? `base model ${pct(before)}` : upGood ? "higher is better" : "lower is better"}</div>
+                <div className="muted small">{before != null ? `Before training: ${pct(before)}` : upGood ? "Higher is better" : "Lower is better"}</div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="muted small">Trains one seed (about 2 minutes), then scores it on held-out tables 31-40 and on refusal checks (about 15 minutes); the planner switches to the new adapter when it finishes.</div>
+          <div className="muted small">Training takes about 2 min. The tests take about 15 min: new tables 31 to 40, and the refusal checks. When the tests finish, the planner uses the new model.</div>
         )}
       </div>
       <div className="arm-card">
@@ -472,7 +472,7 @@ export function ArmView({ refresh }: { refresh: number }) {
           <span className="muted small">{bench?.n_tasks ?? 21} tabletop tasks with hidden goals, scored by the simulator (never by a model)</span>
           <span className="grow" />
           {bench?.status === "running" && <span className="muted small">{bench.rows?.length ?? 0}/{bench.total}</span>}
-          <button className="btn sm primary" disabled={bench?.status === "running"} onClick={() => act(api.arm.benchStart(), setBench)}>{bench?.status === "running" ? "running…" : "Run benchmark"}</button>
+          <button className="btn sm primary" disabled={bench?.status === "running"} onClick={() => act(api.arm.benchStart(), setBench)}>{bench?.status === "running" ? "Running…" : "Run the benchmark"}</button>
         </div>
         {bench?.summary ? (
           <>
@@ -488,7 +488,7 @@ export function ArmView({ refresh }: { refresh: number }) {
                 );
               })}
             </div>
-            <div className="muted small">Success = the hidden goal holds in the simulated scene after the plan runs (a plan the simulator rejects never runs). Valid = the simulator found no errors. {bench.planner}{bench.finished ? ` · finished ${bench.finished.replace("T", " ")}` : ""}</div>
+            <div className="muted small">Success: after the plan runs, the hidden goal is true in the simulated scene. The simulator never runs a plan that it rejects. Valid: the simulator found no errors. Planner: {bench.planner}.{bench.finished ? ` Finished ${bench.finished.replace("T", " ")}.` : ""}</div>
             <details>
               <summary className="muted small">per task</summary>
               <table className="arm-grid">
@@ -508,7 +508,7 @@ export function ArmView({ refresh }: { refresh: number }) {
             </details>
           </>
         ) : (
-          <div className="muted small">Four planners on the same tasks (bin, stack, shift, two blocks, nearest, swap, and an out-of-reach block that should be refused): the oracle ceiling, the model writing joint angles, one skill program, and skill programs repaired from simulator feedback.</div>
+          <div className="muted small">Four planners do the same tasks: put in the bin, stack, move, two blocks, nearest block, swap, and a block out of reach that the planner must refuse. The planners are a perfect plan (the upper limit), the model writing joint angles, a skill program with 1 try, and a skill program with up to 3 tries after simulator errors.</div>
         )}
       </div>
     </div>

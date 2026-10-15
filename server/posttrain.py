@@ -66,22 +66,29 @@ def _jobs() -> list[dict[str, Any]]:
     return json.loads(p.read_text()) if p.exists() else []
 
 
-def fit(model: str, method: str) -> dict[str, Any]:
+def fit(model: str, method: str, task: str) -> dict[str, Any]:
     """The settings a Mac run uses: the largest batch and length whose estimated peak is under the cap."""
-    est = _mlx_post().estimate_gb
+    mp = _mlx_post()
+    est = mp.estimate_gb
+    key = "custom" if task.startswith("custom:") else task
+    shortest = min(1024, mp.TASK_TOKENS.get(key, 0))  # a shorter length cuts the answer off the end of each example
     for b, n in FITS[method]:
-        gb = est(model, method, n, 2, b)
+        if n < shortest:
+            continue
+        gb = est(model, method, n, 2, b, task=key)
         if gb <= _cap():
             return {"batch": b, "seq": n, "gb": gb, "fits": True}
-    return {"batch": b, "seq": n, "gb": gb, "fits": False}
+    b, n = next(((b, n) for b, n in reversed(FITS[method]) if n >= shortest), FITS[method][0])
+    return {"batch": b, "seq": n, "gb": est(model, method, n, 2, b, task=key), "fits": False}
 
 
 def overview() -> dict[str, Any]:
     models = []
     for m in MODELS:
         if m["engine"] == "mlx":
-            f = {meth["id"]: fit(m["id"], meth["id"]) for meth in METHODS}
-            models.append({**m, "estimate_gb": {k: v["gb"] for k, v in f.items()}, "fits": {k: v["fits"] for k, v in f.items()}, "settings": f})
+            st = {t: {meth["id"]: fit(m["id"], meth["id"], t) for meth in METHODS} for t in [x["id"] for x in TASKS] + ["custom"]}
+            f = st["arm"]
+            models.append({**m, "estimate_gb": {k: v["gb"] for k, v in f.items()}, "fits": {k: v["fits"] for k, v in f.items()}, "settings": f, "by_task": st})
         else:
             models.append({**m, "estimate_gb": None, "fits": None})
     return {"tasks": TASKS, "methods": METHODS, "models": models, "cap_gb": _cap(), "jobs": jobs(), "datasets": datasets(), "promoted": promoted()}
@@ -118,7 +125,7 @@ def start(task: str, method: str, model: str, iters: int = 60, safety: bool = Tr
         where = "5090"
     else:
         task_arg = f"custom:{_data_dir() / (task[7:] + '.jsonl')}" if custom else task
-        f = fit(model, method)
+        f = fit(model, method, task)
         if not f["fits"]:
             raise ValueError(f"{m['label']} needs about {f['gb']} GB for {method.upper()}, above this Mac's cap of {_cap()} GB")
         args = f"--mode {method} --task {task_arg} --model {model} --iters {int(iters)} --batch {f['batch']} --seq {f['seq']}" + (" --safety" if safety else "")

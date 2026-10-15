@@ -19,6 +19,8 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01";  /* Inter: single-storey a off, open digits */
+  letter-spacing: -0.006em;
   overflow: hidden;
 }
 

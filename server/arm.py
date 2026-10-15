@@ -426,13 +426,13 @@ def provider() -> str:
 def planner_name() -> str:
     pv = provider()
     if pv == "nebius":
-        return f"{tier_model('fast')} → {tier_model('deep')} @ Nebius Token Factory"
+        return f"{tier_model('fast')}, then {tier_model('deep')}, on Nebius Token Factory"
     if pv == "selfhost":
         host, cfg = selfhost()
         if cfg.get("prompt") == "student":
-            return f"{cfg['model']} @ 5090 (fine-tuned on simulator-verified programs)"
-        return f"{cfg['model']} (thinking off → on) @ {host}, self-hosted vLLM"
-    return "chat model (add a Nebius Token Factory key for Nemotron)"
+            return f"Nemotron 3 Nano 4B on the 5090, trained on plans that the simulator accepted ({cfg['model']})"
+        return f"{cfg['model']} on {host} (vLLM), thinking off, then on"
+    return "the chat model of the app (add a Nebius Token Factory key to use Nemotron)"
 
 
 def _llm(messages: list[dict[str, str]], tier: str = "fast", info: dict[str, Any] | None = None) -> tuple[str, str]:

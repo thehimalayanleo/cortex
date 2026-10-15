@@ -77,7 +77,10 @@ export interface ArmObject { name: string; kind: "block" | "bin"; xyz: number[];
 export interface ArmWorld { objects: ArmObject[]; held: string | null; seed?: number }
 export interface ArmIssue { step: number; level: "error" | "warn"; msg: string }
 export interface ArmAttempt { tier: string; model: string; seconds: number; program?: Record<string, unknown>[]; note?: string; issues: ArmIssue[]; ok: boolean }
-export interface ArmPlanOut { instruction: string; mode: string; waypoints: { name: string; joints: Record<string, number>; seconds: number; tip: number[]; step?: number }[]; note: string; planner: string; executed: boolean; ok: boolean; refused: boolean; issues: ArmIssue[]; attempts: ArmAttempt[]; program?: Record<string, unknown>[]; goal?: { pred: string; obj?: string; target?: string; xy?: number[] }[]; world_after: ArmWorld }
+export interface TraceSpan { id: number; parent: number | null; name: string; kind: string; start: number; end: number | null; status: string; attrs: Record<string, unknown> }
+export interface ArmTraceInfo { id: string; instruction: string; mode: string; planner: string; ok: boolean; refused: boolean; executed: boolean; ms: number; when: string; spans: number }
+export interface ArmTrace extends Omit<ArmTraceInfo, "spans"> { spans: TraceSpan[] }
+export interface ArmPlanOut { instruction: string; mode: string; waypoints: { name: string; joints: Record<string, number>; seconds: number; tip: number[]; step?: number }[]; note: string; planner: string; executed: boolean; ok: boolean; refused: boolean; issues: ArmIssue[]; attempts: ArmAttempt[]; program?: Record<string, unknown>[]; goal?: { pred: string; obj?: string; target?: string; xy?: number[] }[]; world_after: ArmWorld; trace?: { id: string; spans: TraceSpan[] } }
 export interface ArmBenchRow { task: string; mode: string; success: boolean; valid: boolean; refused: boolean; fails: string[]; errors: string[]; calls: number; models: string[]; seconds: number }
 export interface ArmBench { status: string; started?: string; finished?: string; planner?: string; n_tasks?: number; modes?: string[]; total?: number; rows?: ArmBenchRow[]; summary?: Record<string, { n: number; success: number; valid: number; calls: number; seconds: number }> }
 export interface ArmTrainResult { seed: number; safety: boolean; steps: number; examples: number; seconds: number; adapter: string; per_family: Record<string, [number, number]>;
@@ -286,6 +289,8 @@ export const api = {
     play: (id: string, speed = 1) => request<ArmStatus>(`/arm/episodes/${encodeURIComponent(id)}/play?speed=${speed}`, { method: "POST" }),
     plan: (instruction: string, execute: boolean, mode = "skills") => request<ArmPlanOut>("/arm/plan", { method: "POST", body: JSON.stringify({ instruction, execute, mode }) }),
     resetWorld: (seed: number, far = false) => request<ArmWorld>("/arm/world", { method: "POST", body: JSON.stringify({ seed, far }) }),
+    traces: () => request<ArmTraceInfo[]>("/arm/traces"),
+    trace: (id: string) => request<ArmTrace>(`/arm/traces/${encodeURIComponent(id)}`),
     bench: () => request<ArmBench>("/arm/bench"),
     benchStart: (seeds = [1, 2, 3]) => request<ArmBench>("/arm/bench", { method: "POST", body: JSON.stringify({ seeds }) }),
     nebius: () => request<NebiusStatus>("/arm/nebius"),

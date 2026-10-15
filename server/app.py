@@ -1049,6 +1049,19 @@ def arm_plan(p: ArmPlan):
         raise HTTPException(400, str(e))
 
 
+@app.get("/api/arm/traces")
+def arm_traces():
+    return arm.list_traces()
+
+
+@app.get("/api/arm/traces/{tid}")
+def arm_trace(tid: str):
+    try:
+        return arm.get_trace(tid)
+    except KeyError:
+        raise HTTPException(404, "no such trace")
+
+
 @app.get("/api/arm/world")
 def arm_world_get():
     return arm.world()

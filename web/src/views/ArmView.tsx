@@ -10,6 +10,7 @@ import type { ArmBench, ArmEpisode, ArmPlanOut, ArmStatus, ArmTrain, NebiusStatu
 import { navigate } from "../lib/router";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
+import { TraceView } from "../components/TraceView";
 
 type P3 = [number, number, number];
 function hull(pts: P3[]): P3[] {
@@ -359,16 +360,18 @@ export function ArmView({ refresh }: { refresh: number }) {
               {plan.goal && plan.goal.length > 0 && (
                 <div className="small"><span className="muted">declared goal </span><span className="mono">{plan.goal.map((g) => `${g.pred}(${g.obj}${g.target ? `, ${g.target}` : ""}${g.xy ? `, ${g.xy.map((v) => v.toFixed(2)).join(", ")}` : ""})`).join(" ∧ ")}</span></div>
               )}
-              <div className="arm-attempts">
-                {plan.attempts.map((a, i) => (
-                  <div key={i} className={`att ${a.ok ? "ok" : "bad"}`}>
-                    <span className="mono small">#{i + 1} {a.tier}</span>
-                    <span className="mono small grow">{a.model}</span>
-                    <span className="muted small">{a.seconds}s · {a.issues.filter((x) => x.level === "error").length} errors</span>
-                  </div>
-                ))}
-              </div>
-              {plan.issues.length > 0 && (
+              {plan.trace ? <TraceView spans={plan.trace.spans} /> : (
+                <div className="arm-attempts">
+                  {plan.attempts.map((a, i) => (
+                    <div key={i} className={`att ${a.ok ? "ok" : "bad"}`}>
+                      <span className="mono small">#{i + 1} {a.tier}</span>
+                      <span className="mono small grow">{a.model}</span>
+                      <span className="muted small">{a.seconds}s · {a.issues.filter((x) => x.level === "error").length} errors</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!plan.trace && plan.issues.length > 0 && (
                 <ul className="arm-issues">
                   {plan.issues.map((x, i) => <li key={i} className={x.level}><span className="mono">step {x.step}</span> {x.msg}</li>)}
                 </ul>

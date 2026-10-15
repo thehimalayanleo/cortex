@@ -12,6 +12,7 @@ Token Factory when NEBIUS_API_KEY is set (the Nebius x NVIDIA track), otherwise 
 """
 from __future__ import annotations
 
+import contextlib
 import glob
 import json
 import os
@@ -434,8 +435,8 @@ def planner_name() -> str:
     return "chat model (add a Nebius Token Factory key for Nemotron)"
 
 
-def _llm(messages: list[dict[str, str]], tier: str = "fast") -> tuple[str, str]:
-    """One chat call. Returns (text, model id)."""
+def _llm(messages: list[dict[str, str]], tier: str = "fast", info: dict[str, Any] | None = None) -> tuple[str, str]:
+    """One chat call. Returns (text, model id); fills info with the token counts when given."""
     from openai import OpenAI
     pv = provider()
     if pv == "nebius":
@@ -453,6 +454,8 @@ def _llm(messages: list[dict[str, str]], tier: str = "fast") -> tuple[str, str]:
         c, model = chat.client(), chat.DEFAULT_MODEL
         kw = {"model": model, "messages": messages, "temperature": 0.2, "max_tokens": 6000, "extra_body": {"reasoning_effort": "low"}}
     r = c.chat.completions.create(**kw)
+    if info is not None and r.usage:
+        info.update(prompt_tokens=r.usage.prompt_tokens, reply_tokens=r.usage.completion_tokens)
     m = r.choices[0].message
     txt = m.content or ""
     if not txt.strip():  # some providers put the whole reply in the reasoning field
@@ -467,6 +470,71 @@ def _json(txt: str) -> dict[str, Any]:
     if not m:
         raise ValueError(f"no JSON in the reply: {txt[:200]}")
     return json.loads(m.group(0))
+
+
+# ---------------------------------------------------------------- traces
+
+class Trace:
+    """Spans for one plan, shaped like OpenTelemetry: id, parent, name, kind, start and end in ms from the trace
+    start, status, attributes. The UI draws them as a tree with a waterfall."""
+
+    def __init__(self) -> None:
+        self.t0 = time.time()
+        self.spans: list[dict[str, Any]] = []
+        self._stack: list[int] = []
+
+    def _ms(self) -> float:
+        return round((time.time() - self.t0) * 1000, 1)
+
+    @contextlib.contextmanager
+    def span(self, name: str, kind: str = "step", **attrs: Any):
+        s = {"id": len(self.spans), "parent": self._stack[-1] if self._stack else None, "name": name, "kind": kind,
+             "start": self._ms(), "end": None, "status": "ok", "attrs": attrs}
+        self.spans.append(s)
+        self._stack.append(s["id"])
+        try:
+            yield s
+        except Exception as e:
+            s["status"] = "error"
+            s["attrs"]["error"] = str(e)[:300]
+            raise
+        finally:
+            s["end"] = self._ms()
+            self._stack.pop()
+
+
+def _traces() -> Path:
+    d = _dir() / "traces"
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def list_traces(limit: int = 30) -> list[dict[str, Any]]:
+    out = []
+    for f in sorted(_traces().glob("*.json"), reverse=True)[:limit]:
+        try:
+            t = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        out.append({k: t.get(k) for k in ("id", "instruction", "mode", "planner", "ok", "refused", "executed", "ms", "when")} | {"spans": len(t.get("spans", []))})
+    return out
+
+
+def get_trace(tid: str) -> dict[str, Any]:
+    f = _traces() / f"{Path(tid).name}.json"
+    if not f.exists():
+        raise KeyError(tid)
+    return json.loads(f.read_text())
+
+
+def _save_trace(out: dict[str, Any], tr: Trace) -> str:
+    tid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+    t = {"id": tid, "when": time.strftime("%Y-%m-%dT%H:%M:%S"), "ms": tr.spans[0]["end"] if tr.spans else 0, "spans": tr.spans,
+         **{k: out.get(k) for k in ("instruction", "mode", "planner", "ok", "refused", "executed")}}
+    _traces().joinpath(f"{tid}.json").write_text(json.dumps(t))
+    for old in sorted(_traces().glob("*.json"))[:-200]:  # keep the last 200
+        old.unlink()
+    return tid
 
 
 # ---------------------------------------------------------------- planners
@@ -505,9 +573,20 @@ Current joints: {joints}.
 Answer with JSON only: {{"waypoints": [{{"name": str, "joints": {{joint: deg}}, "seconds": float}}], "note": str}}, 2 to 16 waypoints. If the task cannot be done, answer {{"refuse": "reason"}}."""
 
 
-def _check(w: dict[str, Any], program: list[dict[str, Any]], start: dict[str, float]) -> dict[str, Any]:
-    wps, issues, refused = W.compile_program(w, program, start)
-    sim = W.simulate(w, wps, start) if not refused else {"world": w, "issues": [], "timeline": []}
+def _errs(issues: list[dict[str, Any]]) -> list[str]:
+    return [f"step {i['step']}: {i['msg']}" for i in issues if i["level"] == "error"]
+
+
+def _check(w: dict[str, Any], program: list[dict[str, Any]], start: dict[str, float], tr: Trace | None = None) -> dict[str, Any]:
+    tr = tr or Trace()
+    with tr.span("compile", "sim", ops=len(program)) as s:
+        wps, issues, refused = W.compile_program(w, program, start)
+        s["attrs"].update(waypoints=len(wps), refused=refused, errors=_errs(issues))
+        s["status"] = "error" if s["attrs"]["errors"] else "ok"
+    with tr.span("simulate", "sim", waypoints=len(wps)) as s:
+        sim = W.simulate(w, wps, start) if not refused else {"world": w, "issues": [], "timeline": []}
+        s["attrs"].update(errors=_errs(sim["issues"]), skipped=refused)
+        s["status"] = "error" if s["attrs"]["errors"] else "ok"
     issues = issues + sim["issues"]
     for wp in wps:
         wp["tip"] = [round(v, 4) for v in W.fk(wp["joints"])[-1]]
@@ -515,9 +594,10 @@ def _check(w: dict[str, Any], program: list[dict[str, Any]], start: dict[str, fl
             "ok": not any(i["level"] == "error" for i in issues)}
 
 
-def plan_skills(instruction: str, w: dict[str, Any], start: dict[str, float], repairs: int = 2) -> dict[str, Any]:
+def plan_skills(instruction: str, w: dict[str, Any], start: dict[str, float], repairs: int = 2, tr: Trace | None = None) -> dict[str, Any]:
     """Nemotron writes a program; the simulator checks it; errors go back for a rewrite. Attempt 1 and 2 use the fast
     tier, the last repair escalates to the deep tier."""
+    tr = tr or Trace()
     student = provider() == "selfhost" and selfhost()[1].get("prompt") == "student"
     msgs = [{"role": "system", "content": (STUDENT_PROMPT if student else SKILL_PROMPT).format(scene=W.describe(w))}, {"role": "user", "content": instruction}]
     attempts: list[dict[str, Any]] = []
@@ -525,23 +605,35 @@ def plan_skills(instruction: str, w: dict[str, Any], start: dict[str, float], re
     for k in range(repairs + 1):
         tier = "deep" if (k == repairs and k > 0) else "fast"
         t0 = time.time()
-        try:
-            txt, model = _llm(msgs, tier)
-            data = _json(txt)
-            prog = [p for p in data.get("program", []) if isinstance(p, dict)]
-            chk = _check(w, prog, start)
-            note = str(data.get("note", ""))[:300]
-            goal = [g for g in data.get("goal", []) if isinstance(g, dict)]
-            if not chk["refused"]:  # the model's own postcondition must hold in the simulated scene
-                if not goal:
-                    chk["issues"].append({"step": 0, "level": "error", "msg": "no goal declared: say what the scene should look like when the task is done"})
-                else:
-                    held, fails = W.check_goal(chk["world_after"], goal, False)
-                    chk["issues"] += [{"step": 0, "level": "error", "msg": f"your declared goal does not hold after the program: {f}"} for f in fails]
-                chk["ok"] = not any(i["level"] == "error" for i in chk["issues"])
-        except Exception as e:
-            txt, model, prog, note, goal = "", tier, [], "", []
-            chk = {"waypoints": [], "issues": [{"step": 0, "level": "error", "msg": f"unusable reply: {e}"[:300]}], "refused": False, "world_after": w, "timeline": [], "ok": False}
+        with tr.span(f"attempt {k + 1}" if k == 0 else f"repair {k}", "attempt", tier=tier) as sa:
+            try:
+                with tr.span("model call", "llm", tier=tier, input=msgs[-1]["content"][:4000]) as s:
+                    info: dict[str, Any] = {}
+                    txt, model = _llm(msgs, tier, info)
+                    s["attrs"].update(model=model, output=txt[:4000], **info)
+                with tr.span("parse reply", "parse") as s:
+                    data = _json(txt)
+                    prog = [p for p in data.get("program", []) if isinstance(p, dict)]
+                    note = str(data.get("note", ""))[:300]
+                    goal = [g for g in data.get("goal", []) if isinstance(g, dict)]
+                    s["attrs"].update(program=prog, goal=goal)
+                chk = _check(w, prog, start, tr)
+                if not chk["refused"]:  # the model's own postcondition must hold in the simulated scene
+                    with tr.span("check goal", "sim", goal=goal) as s:
+                        if not goal:
+                            chk["issues"].append({"step": 0, "level": "error", "msg": "no goal declared: say what the scene should look like when the task is done"})
+                            s["attrs"]["errors"] = ["no goal declared"]
+                        else:
+                            held, fails = W.check_goal(chk["world_after"], goal, False)
+                            chk["issues"] += [{"step": 0, "level": "error", "msg": f"your declared goal does not hold after the program: {f}"} for f in fails]
+                            s["attrs"]["errors"] = fails
+                        s["status"] = "error" if s["attrs"]["errors"] else "ok"
+                    chk["ok"] = not any(i["level"] == "error" for i in chk["issues"])
+            except Exception as e:
+                txt, model, prog, note, goal = "", tier, [], "", []
+                chk = {"waypoints": [], "issues": [{"step": 0, "level": "error", "msg": f"unusable reply: {e}"[:300]}], "refused": False, "world_after": w, "timeline": [], "ok": False}
+            sa["attrs"].update(model=model, ok=chk["ok"], refused=chk["refused"], errors=_errs(chk["issues"]))
+            sa["status"] = "ok" if chk["ok"] else "error"
         attempts.append({"tier": tier, "model": model, "seconds": round(time.time() - t0, 1), "program": prog, "goal": goal, "note": note, "issues": chk["issues"], "ok": chk["ok"]})
         if chk["ok"]:
             break
@@ -551,17 +643,24 @@ def plan_skills(instruction: str, w: dict[str, Any], start: dict[str, float], re
     return {**chk, "attempts": attempts, "program": attempts[-1]["program"], "goal": attempts[-1]["goal"], "note": attempts[-1]["note"]}
 
 
-def plan_joints(instruction: str, w: dict[str, Any], start: dict[str, float]) -> dict[str, Any]:
+def plan_joints(instruction: str, w: dict[str, Any], start: dict[str, float], tr: Trace | None = None) -> dict[str, Any]:
     """The original planner: the model writes joint angles itself. Kept as the baseline."""
+    tr = tr or Trace()
     t0 = time.time()
     sysmsg = JOINT_PROMPT.format(limits=json.dumps(LIMITS), links=json.dumps(LINKS), scene=W.describe(w), joints=json.dumps({j: round(v, 1) for j, v in start.items()}))
     try:
-        txt, model = _llm([{"role": "system", "content": sysmsg}, {"role": "user", "content": instruction}])
+        with tr.span("model call", "llm", tier="fast", input=instruction) as s:
+            info: dict[str, Any] = {}
+            txt, model = _llm([{"role": "system", "content": sysmsg}, {"role": "user", "content": instruction}], "fast", info)
+            s["attrs"].update(model=model, output=txt[:4000], **info)
         data = _json(txt)
         refused = bool(data.get("refuse"))
         wps = [{"name": str(x.get("name", ""))[:40], "joints": {j: float(x.get("joints", {}).get(j, start[j])) for j in JOINTS}, "seconds": float(max(0.3, min(6.0, x.get("seconds", 1.5)))), "step": n}
                for n, x in enumerate(data.get("waypoints", [])[:16], 1) if isinstance(x, dict)]
-        sim = W.simulate(w, wps, start) if not refused else {"world": w, "issues": [], "timeline": []}
+        with tr.span("simulate", "sim", waypoints=len(wps)) as s:
+            sim = W.simulate(w, wps, start) if not refused else {"world": w, "issues": [], "timeline": []}
+            s["attrs"]["errors"] = _errs(sim["issues"])
+            s["status"] = "error" if s["attrs"]["errors"] else "ok"
         issues = sim["issues"]
     except Exception as e:
         model, refused, wps, sim = "?", False, [], {"world": w, "timeline": []}
@@ -576,12 +675,19 @@ def plan(instruction: str, execute: bool = False, mode: str = "skills") -> dict[
     st = status()
     w = world()
     start = dict(st["target"])
-    out = plan_joints(instruction, w, start) if mode == "joints" else plan_skills(instruction, w, start)
-    out.update(instruction=instruction, mode=mode, planner=planner_name(), executed=False)
-    out["waypoints"] = [{**wp, "joints": {j: clamp(j, v) for j, v in wp["joints"].items()}} for wp in out["waypoints"]]
-    if execute and out["ok"] and not out["refused"] and out["waypoints"]:
-        run_waypoints(out["waypoints"], out["timeline"])
-        out["executed"] = True
+    tr = Trace()
+    with tr.span("plan", "root", instruction=instruction, mode=mode, planner=planner_name(), scene=W.describe(w)) as root:
+        out = plan_joints(instruction, w, start, tr) if mode == "joints" else plan_skills(instruction, w, start, tr=tr)
+        out.update(instruction=instruction, mode=mode, planner=planner_name(), executed=False)
+        out["waypoints"] = [{**wp, "joints": {j: clamp(j, v) for j, v in wp["joints"].items()}} for wp in out["waypoints"]]
+        if execute and out["ok"] and not out["refused"] and out["waypoints"]:
+            with tr.span("start motion", "exec", waypoints=len(out["waypoints"]), motion_seconds=round(sum(wp.get("seconds", 1.5) for wp in out["waypoints"]), 1),
+                         target=status()["mode"]):
+                run_waypoints(out["waypoints"], out["timeline"])
+            out["executed"] = True
+        root["attrs"].update(ok=out["ok"], refused=out["refused"], executed=out["executed"])
+        root["status"] = "ok" if out["ok"] else "error"
+    out["trace"] = {"id": _save_trace(out, tr), "spans": tr.spans}
     out.pop("timeline", None)
     _dir().joinpath("last_plan.json").write_text(json.dumps(out))
     return out

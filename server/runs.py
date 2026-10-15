@@ -332,6 +332,9 @@ def _run(d: Path, meta: dict) -> None:
                 scp_opts = [("-P" if o == "-p" else o) for o in _ssh_opts()]
                 subprocess.run(["scp", *scp_opts, str(script), f"{host}:~/cortex-lab/scratch/{script.name}"], check=True, timeout=60)
         cmd = _command(meta["executor"], meta["recipe"], meta["args"], script, meta.get("cmd"))
+        if meta["executor"] == "ssh" and not meta.get("cmd"):
+            cmd = _detached(cmd, meta["id"])  # the job survives a Cortex restart; we read its log on the box
+            meta["remote_log"] = f"~/cortex-lab/out/runs/{meta['id']}.log"
         log.write("[cortex] $ " + " ".join(shlex.quote(c) for c in cmd) + "\n")
         env = dict(os.environ, PYTHONUNBUFFERED="1")
         proc = subprocess.Popen(cmd, cwd=str(LAB if meta.get("cmd") else ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
@@ -340,7 +343,52 @@ def _run(d: Path, meta: dict) -> None:
         meta["status"] = "running"
         _write_meta(d, meta)
         assert proc.stdout is not None
-        for line in proc.stdout:
+        remote_exit = _consume(proc, d, meta, log, metrics)
+        code = proc.wait()
+        if meta.get("remote_log"):
+            if remote_exit is None:
+                raise RuntimeError("lost the connection to the GPU box; the job may still be running there")
+            code = remote_exit
+        meta["exit"] = code
+        try:  # stop() marks the on-disk meta as stopping; honour it
+            stopping = json.loads((d / "meta.json").read_text()).get("status") == "stopping"
+        except Exception:
+            stopping = False
+        meta["status"] = "done" if code == 0 else ("stopped" if stopping else "failed")
+    except Exception as e:
+        log.write(f"[cortex] {e}\n")
+        meta["status"] = "failed"
+        meta["error"] = str(e)
+    finally:
+        meta["ended"] = _now()
+        _write_meta(d, meta)
+        log.close()
+        metrics.close()
+        with _lock:
+            _procs.pop(meta["id"], None)
+
+
+def _detached(cmd: list[str], rid: str) -> list[str]:
+    """ssh ... 'REMOTE' -> ssh ... 'start REMOTE detached with its own log; print its pid; follow the log until it exits'."""
+    remote = cmd[-1]
+    inner = f"{remote}; echo __EXIT__ $?"
+    job = (f"mkdir -p ~/cortex-lab/out/runs && cd ~/cortex-lab && setsid nohup bash -c {shlex.quote(inner)} > out/runs/{rid}.log 2>&1 < /dev/null & "
+           f"P=$!; echo __PID__ $P; tail -n +1 -f --pid=$P ~/cortex-lab/out/runs/{rid}.log")
+    return [*cmd[:-1], job]
+
+
+def _consume(proc: subprocess.Popen, d: Path, meta: dict, log, metrics) -> int | None:
+    """Read a run's output: log it, parse METRIC / ROLLOUT / RESULT, and the detached job's __PID__ / __EXIT__ markers."""
+    remote_exit = None
+    for line in proc.stdout:
+        if line.startswith("__PID__ "):
+            meta["remote_pid"] = int(line.split()[1])
+            _write_meta(d, meta)
+            continue
+        if line.startswith("__EXIT__ "):
+            remote_exit = int(line.split()[1])
+            continue
+        if True:
             log.write(line)
             s = line.strip()
             if s and not s.startswith("METRIC "):
@@ -364,13 +412,28 @@ def _run(d: Path, meta: dict) -> None:
                     (d / "result.json").write_text(json.dumps(json.loads(s[7:]), indent=2))
                 except Exception:
                     pass
-        code = proc.wait()
-        meta["exit"] = code
-        try:  # stop() marks the on-disk meta as stopping; honour it
-            stopping = json.loads((d / "meta.json").read_text()).get("status") == "stopping"
-        except Exception:
-            stopping = False
-        meta["status"] = "done" if code == 0 else ("stopped" if stopping else "failed")
+    return remote_exit
+
+
+def reattach(d: Path, meta: dict) -> None:
+    """After a Cortex restart: follow a detached GPU-box job again (its whole log is re-read, so this is idempotent)."""
+    header = [l for l in (d / "log.txt").read_text(errors="ignore").splitlines(True) if l.startswith("[cortex]")] if (d / "log.txt").exists() else []
+    (d / "log.txt").write_text("".join(header) + "[cortex] re-attached after a Cortex restart\n")
+    (d / "metrics.jsonl").write_text("")
+    log = (d / "log.txt").open("a", buffering=1)
+    metrics = (d / "metrics.jsonl").open("a", buffering=1)
+    try:
+        host = os.environ["CORTEX_SSH_HOST"]
+        pid, rlog = int(meta["remote_pid"]), meta["remote_log"]
+        proc = subprocess.Popen(["ssh", *SSH_OPTS, host, f"tail -n +1 -f --pid={pid} {rlog}"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        with _lock:
+            _procs[meta["id"]] = proc
+        remote_exit = _consume(proc, d, meta, log, metrics)
+        proc.wait()
+        if remote_exit is None:
+            raise RuntimeError("the job on the GPU box ended without an exit marker (killed?)")
+        meta["exit"] = remote_exit
+        meta["status"] = "done" if remote_exit == 0 else "failed"
     except Exception as e:
         log.write(f"[cortex] {e}\n")
         meta["status"] = "failed"
@@ -394,6 +457,12 @@ def stop(rid: str) -> bool:
         meta = json.loads((d / "meta.json").read_text())
         meta["status"] = "stopping"
         _write_meta(d, meta)
+    except Exception:
+        pass
+    try:
+        meta = json.loads((d / "meta.json").read_text())
+        if meta.get("remote_pid"):  # detached job on the GPU box: kill its whole process group there
+            subprocess.run(["ssh", *SSH_OPTS, os.environ.get("CORTEX_SSH_HOST", ""), f"kill -TERM -- -{int(meta['remote_pid'])}"], timeout=30)
     except Exception:
         pass
     p.terminate()
@@ -651,6 +720,9 @@ def mark_stale() -> int:
         try:
             m = json.loads(mp.read_text())
         except Exception:
+            continue
+        if m.get("status") == "running" and m.get("remote_pid") and m.get("remote_log") and os.environ.get("CORTEX_SSH_HOST"):
+            threading.Thread(target=reattach, args=(d, m), daemon=True).start()
             continue
         if m.get("status") in ("queued", "running", "stopping"):
             m["status"] = "failed"

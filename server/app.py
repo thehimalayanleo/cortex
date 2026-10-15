@@ -1098,6 +1098,27 @@ def post_start(j: PostJob):
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/post/data")
+async def post_data(file: UploadFile):
+    try:
+        return posttrain.upload(await file.read(), file.filename or "data.jsonl")
+    except (ValueError, json.JSONDecodeError) as e:
+        raise HTTPException(400, str(e))
+
+
+class PostCompress(BaseModel):
+    sparsity: float = 0.6
+    safety: bool = True
+
+
+@app.post("/api/post/compress")
+def post_compress(c: PostCompress):
+    try:
+        return posttrain.compress_start(c.sparsity, c.safety)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 class PostPreview(BaseModel):
     task: str = "code"
     model: str = "mlx-community/Qwen3-0.6B-4bit"

@@ -213,8 +213,47 @@ class Code:
         return sum(res) / len(res)
 
 
+# ---------------------------------------------------------------- your data: no checker, so a weak word-overlap score
+
+class Custom:
+    doc = "Your uploaded data; scored by word overlap with your reference answers (a weak check)."
+
+    def __init__(self, path: str):
+        rows = [json.loads(l) for l in Path(path).expanduser().read_text().splitlines() if l.strip()]
+        random.Random(0).shuffle(rows)
+        k = max(1, min(30, len(rows) // 10))
+        self.name, self.held, self.train = "custom", rows[:k], rows[k:]
+
+    def system(self):
+        return ""
+
+    def sft_rows(self, n=100000, safety=False):
+        return self.train[:n]
+
+    def rl_rows(self, n=0):
+        raise ValueError("RL needs a checker; uploaded data only supports SFT")
+
+    def heldout(self, n=30):
+        return [(r["messages"][:-1], r["messages"][-1]["content"]) for r in self.held[:n]]
+
+    def expects_refusal(self, answer):
+        return False
+
+    def score(self, answer, text):  # token F1 against the reference answer
+        a, b = re.findall(r"\w+", answer.lower()), re.findall(r"\w+", text.lower())
+        if not a or not b:
+            return 0.0
+        common = sum(min(a.count(w), b.count(w)) for w in set(a))
+        if not common:
+            return 0.0
+        p, r = common / len(b), common / len(a)
+        return 2 * p * r / (p + r)
+
+
 TASKS = {"arm": Arm, "gsm8k": Gsm8k, "code": Code}
 
 
 def get(name: str):
+    if name.startswith("custom:"):
+        return Custom(name[7:])
     return TASKS[name]()

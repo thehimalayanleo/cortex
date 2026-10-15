@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 from . import arm, runs, vault
@@ -63,7 +64,7 @@ def overview() -> dict[str, Any]:
             models.append({**m, "estimate_gb": gb, "fits": {k: v <= _cap() for k, v in gb.items()}})
         else:
             models.append({**m, "estimate_gb": None, "fits": None})
-    return {"tasks": TASKS, "methods": METHODS, "models": models, "cap_gb": _cap(), "jobs": jobs()}
+    return {"tasks": TASKS, "methods": METHODS, "models": models, "cap_gb": _cap(), "jobs": jobs(), "datasets": datasets()}
 
 
 def jobs() -> list[dict[str, Any]]:
@@ -78,7 +79,13 @@ def start(task: str, method: str, model: str, iters: int = 60, safety: bool = Tr
     m = next((x for x in MODELS if x["id"] == model), None)
     if not m:
         raise ValueError(f"unknown model {model}")
-    if task not in {t["id"] for t in TASKS} or method not in {x["id"] for x in METHODS}:
+    custom = task.startswith("custom:")
+    if custom:
+        if method != "sft":
+            raise ValueError("uploaded data has no checker, so only SFT is available")
+        if not (_data_dir() / f"{task[7:]}.jsonl").exists():
+            raise ValueError("no such dataset")
+    elif task not in {t["id"] for t in TASKS} or method not in {x["id"] for x in METHODS}:
         raise ValueError("unknown task or method")
     if m["engine"] == "5090":
         if task != "arm" or method != "sft":
@@ -86,7 +93,8 @@ def start(task: str, method: str, model: str, iters: int = 60, safety: bool = Tr
         run = arm.train_start(seed=seed, safety=safety)
         where = "5090"
     else:
-        args = f"--mode {method} --task {task} --model {model} --iters {int(iters)}" + (" --safety" if safety else "")
+        task_arg = f"custom:{_data_dir() / (task[7:] + '.jsonl')}" if custom else task
+        args = f"--mode {method} --task {task_arg} --model {model} --iters {int(iters)}" + (" --safety" if safety else "")
         if method == "grpo":
             args += " --seq 768 --max-completion 400"
         run = runs.start("mlx_post", args, "local", origin="posttrain")
@@ -132,3 +140,79 @@ def preview(task: str, model: str, adapter: str = "") -> dict[str, Any]:
         model = "mlx-community/Qwen3-0.6B-4bit"  # the preview samples on this Mac
     args = f"--mode preview --task {task} --model {model} --group 4 --group-prompts 3" + (f" --resume {adapter}" if adapter else "")
     return runs.start("mlx_post", args, "local", origin="posttrain-preview")
+
+
+def compress_start(sparsity: float = 0.6, safety: bool = True) -> dict[str, Any]:
+    """Compress the post-trained Qwen3-1.7B arm planner on the 5090 (lab/recipes/compress.py); kept as a job."""
+    if not os.environ.get("CORTEX_SSH_HOST"):
+        raise ValueError("compression runs on the GPU box (CORTEX_SSH_HOST)")
+    sp = 0.5 if sparsity < 0.55 else 0.6
+    run = runs.start("compress", f"--sparsity {sp}" + ("" if safety else " --no-safety"), "ssh", origin="posttrain")
+    job = {"id": time.strftime("%Y%m%d-%H%M%S"), "run": run["id"], "task": "arm", "method": "compress", "model": "Qwen3-1.7B arm planner",
+           "where": "5090", "iters": 0, "safety": bool(safety), "sparsity": sp, "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    js = _jobs()
+    js.append(job)
+    _path().write_text(json.dumps(js, indent=1))
+    return job
+
+
+# ---------------------------------------------------------------- your data: upload, detect the format, normalize to chat rows
+
+def _data_dir():
+    d = vault.VAULT / "posttrain" / "data"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+PAIRS = [("prompt", "completion"), ("prompt", "response"), ("prompt", "answer"), ("instruction", "output"), ("question", "answer"), ("input", "output")]
+
+
+def normalize(raw: bytes, filename: str) -> tuple[list[dict[str, Any]], str]:
+    """Rows to {"messages": [..., {"role": "assistant", ...}]}; returns (rows, the format that was detected)."""
+    import csv
+    import io
+    text = raw.decode("utf-8", errors="replace")
+    if filename.lower().endswith(".csv"):
+        rd = list(csv.DictReader(io.StringIO(text)))
+        if not rd:
+            raise ValueError("the CSV has no rows")
+        cols = [c.lower() for c in rd[0].keys()]
+        pair = next(((a, b) for a, b in PAIRS if a in cols and b in cols), None) or (list(rd[0].keys())[0].lower(), list(rd[0].keys())[1].lower())
+        low = [{k.lower(): v for k, v in r.items()} for r in rd]
+        return [{"messages": [{"role": "user", "content": r[pair[0]]}, {"role": "assistant", "content": r[pair[1]]}]} for r in low if r.get(pair[0]) and r.get(pair[1])], f"CSV columns {pair[0]} → {pair[1]}"
+    rows, fmt = [], None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if isinstance(r.get("messages"), list) and r["messages"] and r["messages"][-1].get("role") == "assistant":
+            rows.append({"messages": [{"role": m["role"], "content": str(m["content"])} for m in r["messages"]]}); fmt = fmt or "chat messages"
+            continue
+        pair = next(((a, b) for a, b in PAIRS if a in r and b in r), None)
+        if not pair:
+            raise ValueError(f"unknown row format, keys {sorted(r)[:6]}: use messages, or prompt/completion, instruction/output, question/answer")
+        user = str(r[pair[0]]) + (f"\n\n{r['input']}" if pair[0] == "instruction" and r.get("input") else "")
+        rows.append({"messages": [{"role": "user", "content": user}, {"role": "assistant", "content": str(r[pair[1]])}]}); fmt = fmt or f"{pair[0]} → {pair[1]}"
+    if not rows:
+        raise ValueError("no rows found")
+    return rows, fmt or "chat messages"
+
+
+def upload(raw: bytes, filename: str) -> dict[str, Any]:
+    import re as _re
+    rows, fmt = normalize(raw, filename)
+    slug = _re.sub(r"[^a-z0-9]+", "-", Path(filename).stem.lower()).strip("-")[:40] or "data"
+    path = _data_dir() / f"{slug}.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    meta = {"name": slug, "rows": len(rows), "format": fmt, "file": filename, "uploaded": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    (_data_dir() / f"{slug}.meta.json").write_text(json.dumps(meta))
+    return {**meta, "preview": rows[:3]}
+
+
+def datasets() -> list[dict[str, Any]]:
+    out = []
+    for m in sorted(_data_dir().glob("*.meta.json")):
+        meta = json.loads(m.read_text())
+        rows = [json.loads(l) for l in (_data_dir() / f"{meta['name']}.jsonl").read_text().splitlines()[:3] if l.strip()]
+        out.append({**meta, "preview": rows})
+    return out

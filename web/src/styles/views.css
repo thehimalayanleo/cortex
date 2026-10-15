@@ -961,3 +961,5 @@ details.pt2-step>summary{cursor:pointer}
 .pt-tests .bad{color:#e07a74}
 @media (max-width:900px){.pt-sft{grid-template-columns:1fr}}
 .lab-panes{margin-left:auto;display:flex;gap:6px}.lab-panes+.lab-howto{margin-left:0}
+.pt-upload{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:10px}
+.pt-upload label.btn{cursor:pointer}

@@ -192,8 +192,11 @@ def main():
     task = pt_tasks.get(a.task)
 
     def base_eval():
-        key = hashlib.sha1(f"{a.model}|{a.task}|v2".encode()).hexdigest()[:10]  # v2: adds over_refusal
-        cache = root / f"base_{a.task}_{key}.json"
+        extra = ""
+        if a.task.startswith("custom:"):  # uploaded data: a new upload gets a new base score
+            st = Path(a.task[7:]).stat(); extra = f"|{st.st_size}|{int(st.st_mtime)}"
+        key = hashlib.sha1(f"{a.model}|{a.task}|v2{extra}".encode()).hexdigest()[:10]  # v2: adds over_refusal
+        cache = root / f"base_{re.sub(r'[^A-Za-z0-9]+', '-', a.task)[-40:]}_{key}.json"
         if cache.exists():
             return json.loads(cache.read_text())
         status(phase="eval", msg="scoring the base model (cached after the first time)")

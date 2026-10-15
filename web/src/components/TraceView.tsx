@@ -29,7 +29,7 @@ function Try({ n, span, steps }: { n: number; span: TraceSpan; steps: TraceSpan[
       <div className="tr-head">
         <b>{n === 1 ? "Try 1" : `Try ${n} (errors sent back to the model)`}</b>
         <span className={ok ? "tr-ok" : "tr-bad"}>{ok ? "passed" : "failed"}</span>
-        <span className="muted small">{secs(span)}</span>
+        <span className="muted">{secs(span)}</span>
         <span className="grow" />
         <button className="lnk small" onClick={() => setOpen((v) => !v)}>{open ? "hide details" : "details"}</button>
       </div>
@@ -38,7 +38,7 @@ function Try({ n, span, steps }: { n: number; span: TraceSpan; steps: TraceSpan[
           <span key={s.id} className={`tr-step ${s.status}`}>{s.status === "ok" ? "✓" : "✗"} {STEP[s.name]}</span>
         ))}
       </div>
-      {problem && <div className="tr-problem">Problem: {clean(problem)}</div>}
+      {problem && <div className="tr-problem"><b>Problem:</b> {clean(problem)}</div>}
       {open && (
         <div className="tr-more">
           {steps.flatMap(errs).length > 1 && <ul className="tr-errs">{steps.flatMap(errs).map((e, i) => <li key={i}>{clean(e)}</li>)}</ul>}
@@ -73,7 +73,7 @@ export function TraceView({ spans }: { spans: TraceSpan[] }) {
           ? `Passed on try ${n} of up to 3. ${moved ? "The arm moved." : "Not run yet."} Total ${secs(root)}.`
           : `Rejected after ${n} ${n === 1 ? "try" : "tries"}. Nothing moved. Last problem: ${lastProblem ? clean(lastProblem) : "unknown"}.`}
       </div>
-      <div className="muted small">The model writes a plan. The simulator checks it. If a check fails, the errors go back to the model, up to 3 tries. Only a plan that passes every check can move the arm.</div>
+      <div className="tr-note">The model writes a plan. The simulator checks it. If a check fails, the errors go back to the model, up to 3 tries. Only a plan that passes every check can move the arm.</div>
       {groups.map((g, i) => <Try key={g.span.id} n={i + 1} span={g.span} steps={g.steps} />)}
     </div>
   );

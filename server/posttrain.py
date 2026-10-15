@@ -16,6 +16,7 @@ from typing import Any
 from . import arm, runs, vault
 
 TASKS = [
+    {"id": "code", "label": "Python functions", "verifier": "unit tests (MBPP), run in a capped process", "safety": False},
     {"id": "arm", "label": "Arm planning", "verifier": "arm simulator (reach, collisions, grasps, hidden goal)", "safety": True},
     {"id": "gsm8k", "label": "Grade-school math", "verifier": "exact final number", "safety": False},
 ]
@@ -120,3 +121,14 @@ def try_job(job_id: str, prompt: str) -> dict[str, Any]:
     if job["task"] in ("arm", "gsm8k"):  # score both answers when the prompt is a task item we can check
         out["note"] = "Answers come from the same prompt. The task checker scores new items in the result, not this question."
     return out
+
+
+def preview(task: str, model: str, adapter: str = "") -> dict[str, Any]:
+    """Start a small Mac run that shows the data: SFT rows as training sees them, and RL groups scored by the verifier."""
+    if task not in {t["id"] for t in TASKS}:
+        raise ValueError("unknown task")
+    m = next((x for x in MODELS if x["id"] == model), None)
+    if not m or m["engine"] != "mlx":
+        model = "mlx-community/Qwen3-0.6B-4bit"  # the preview samples on this Mac
+    args = f"--mode preview --task {task} --model {model} --group 4 --group-prompts 3" + (f" --resume {adapter}" if adapter else "")
+    return runs.start("mlx_post", args, "local", origin="posttrain-preview")

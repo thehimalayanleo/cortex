@@ -6,13 +6,14 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
-import type { PtJob, PtOverview } from "../api";
+import type { PtJob, PtOverview, PtPreview } from "../api";
 import { navigate } from "../lib/router";
 import { useToast } from "../components/Toast";
 import { EmptyState } from "../components/States";
 
 const pct = (v?: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
 const SKILL: Record<string, { title: string; line: string; check: string; example: string }> = {
+  code: { title: "Python functions", line: "Write a short function from a description.", check: "running its unit tests", example: "Write a function that returns the second largest number in a list." },
   gsm8k: { title: "Math", line: "Solve short word problems.", check: "the final number", example: "A shop sells 3 pens for $2. How much do 12 pens cost?" },
   arm: { title: "Robot arm plans", line: "Write a plan that moves blocks on a table.", check: "the arm simulator", example: "Put the red block in the bin." },
 };
@@ -58,6 +59,77 @@ function Option({ on, disabled, onClick, title, line, foot }: { on: boolean; dis
       <span className="small">{line}</span>
       {foot && <span className="muted small">{foot}</span>}
     </button>
+  );
+}
+
+function DataView({ task, model }: { task: string; model: string }) {
+  const { toast } = useToast();
+  const [view, setView] = useState<"sft" | "rl">("sft");
+  const [data, setData] = useState<PtPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setData(null); }, [task]);
+  const show = () => {
+    setBusy(true);
+    api.post.preview(task, model).then(async (r) => {
+      for (let i = 0; i < 120; i++) {
+        await new Promise((ok) => setTimeout(ok, 2000));
+        const run = await api.lab.run(r.id, 5);
+        if (run.status === "done") { setData(run.result as unknown as PtPreview); return; }
+        if (run.status === "failed") throw new Error("The preview failed. Open the run log.");
+      }
+    }).catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false));
+  };
+  return (
+    <section className="pt2-step">
+      <div className="row">
+        <h3>See the data</h3>
+        <div className="seg">
+          <button className={`btn sm${view === "sft" ? " primary" : ""}`} onClick={() => setView("sft")}>SFT data</button>
+          <button className={`btn sm${view === "rl" ? " primary" : ""}`} onClick={() => setView("rl")}>RL data</button>
+        </div>
+        <span className="grow" />
+        <button className="btn sm" disabled={busy} onClick={show}>{busy ? "Sampling…" : data ? "Show new examples" : "Show the data"}</button>
+      </div>
+      <div className="muted small">
+        {view === "sft" ? "SFT: each example is one question and one correct answer. The model reads the question. It learns to write the answer." :
+          "RL: the model writes several answers to one question. The checker scores each answer. Answers above the group average get pushed up; answers below get pushed down."}
+      </div>
+      {!data ? <div className="muted small">Push "Show the data". The lab takes examples from the task and, for RL, samples 4 answers per question on this Mac (about 15 seconds).</div>
+        : view === "sft" ? (
+          <div className="pt-data">
+            {data.sft.map((r, i) => (
+              <div key={i} className="pt-sft">
+                <div className="pt-sft-in"><span className="muted small">The model reads ({r.prompt_tokens} tokens, no training signal)</span><pre>{r.prompt}</pre></div>
+                <div className="pt-sft-out"><span className="small">The model learns to write ({r.answer_tokens} tokens, trained)</span><pre>{r.answer}</pre></div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="pt-data">
+            {data.rl.map((g, i) => (
+              <div key={i} className="pt-group">
+                <pre className="pt-q">{g.prompt}</pre>
+                <div className="muted small">Group average reward {g.mean.toFixed(2)}.{g.std === 0 ? " All answers got the same score, so this question teaches nothing this time." : ""}</div>
+                <div className="pt-rolls">
+                  {g.rollouts.map((o, k) => {
+                    const dir = o.advantage > 0.05 ? "up" : o.advantage < -0.05 ? "down" : "flat";
+                    return (
+                      <div key={k} className={`pt-roll ${dir}`}>
+                        <div className="row"><b className="small">Answer {k + 1}</b><span className="grow" />
+                          <span className="mono small">{o.tests ? `${o.tests.filter((t) => t.passed).length}/${o.tests.length} tests` : `reward ${o.reward}`}</span></div>
+                        <div className="pt-adv"><span style={{ width: `${Math.min(100, Math.abs(o.advantage) * 40)}%` }} /></div>
+                        <div className="small">{dir === "up" ? `Pushed up (advantage +${o.advantage.toFixed(2)})` : dir === "down" ? `Pushed down (advantage ${o.advantage.toFixed(2)})` : "No change (advantage 0)"}</div>
+                        {o.tests && <div className="pt-tests">{o.tests.map((t, j) => <span key={j} className={t.passed ? "ok" : "bad"} title={t.test}>{t.passed ? "✓" : "✗"}</span>)}</div>}
+                        <details><summary className="muted small">code</summary><pre>{o.completion}</pre></details>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+    </section>
   );
 }
 
@@ -123,7 +195,7 @@ export function PostTrainView({ refresh }: { refresh: number }) {
       <section className="pt2-step">
         <h3><span className="pt-n">1</span> What should it learn?</h3>
         <div className="pt-opts">
-          {["gsm8k", "arm"].map((t) => <Option key={t} on={task === t} onClick={() => setTask(t)} title={SKILL[t].title} line={SKILL[t].line} foot={`Checked by ${SKILL[t].check}`} />)}
+          {["code", "gsm8k", "arm"].map((t) => <Option key={t} on={task === t} onClick={() => setTask(t)} title={SKILL[t].title} line={SKILL[t].line} foot={`Checked by ${SKILL[t].check}`} />)}
         </div>
       </section>
 
@@ -148,6 +220,8 @@ export function PostTrainView({ refresh }: { refresh: number }) {
           </details>
         </div>
       </section>
+
+      <DataView task={task} model={model} />
 
       {job && (
         <section className="pt2-step pt2-run">

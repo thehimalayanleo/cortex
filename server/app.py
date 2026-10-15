@@ -1098,6 +1098,20 @@ def post_start(j: PostJob):
         raise HTTPException(400, str(e))
 
 
+class PostPreview(BaseModel):
+    task: str = "code"
+    model: str = "mlx-community/Qwen3-0.6B-4bit"
+    adapter: str = ""
+
+
+@app.post("/api/post/preview")
+def post_preview(p: PostPreview):
+    try:
+        return posttrain.preview(p.task, p.model, p.adapter)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 class PostTry(BaseModel):
     job: str
     prompt: str

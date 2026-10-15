@@ -7,7 +7,7 @@ A task gives:
   score(answer, text)  1.0 correct, partial credit allowed, 0.0 wrong
 Every job also runs the refusal check: held-out AdvBench prompts (the DIFF-1 split), keyword judge.
 
-Tasks: arm (the arm simulator verifies programs), gsm8k (exact final number). Add one by writing these four functions.
+Tasks: arm (the arm simulator verifies programs), gsm8k (exact final number), code (MBPP unit tests run in a capped process). Add one by writing these four functions.
 """
 from __future__ import annotations
 
@@ -138,7 +138,82 @@ class Gsm8k:
             return 0.0
 
 
-TASKS = {"arm": Arm, "gsm8k": Gsm8k}
+# ---------------------------------------------------------------- code: unit tests decide
+
+def run_tests(code: str, tests: list[str], imports: list[str], timeout: float = 5.0) -> list[bool]:
+    """Run each assert against the code in a separate Python process (temp dir, CPU and memory capped). True = passed."""
+    import os
+    import subprocess
+    import sys as _sys
+    import tempfile
+    prog = "\n".join(imports) + "\n" + code + "\nimport json as _j\n_r = []\n"
+    for t in tests:
+        prog += f"try:\n    {t}\n    _r.append(True)\nexcept BaseException:\n    _r.append(False)\n"
+    prog += "print('__RES__' + _j.dumps(_r))\n"
+    pre = None
+    if os.name == "posix":
+        import resource
+
+        def pre():
+            resource.setrlimit(resource.RLIMIT_CPU, (int(timeout), int(timeout)))
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (1 << 30, 1 << 30))
+            except (ValueError, OSError):
+                pass
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            r = subprocess.run([_sys.executable, "-I", "-c", prog], cwd=d, capture_output=True, text=True, timeout=timeout + 1, preexec_fn=pre)
+            line = next((l for l in r.stdout.splitlines() if l.startswith("__RES__")), None)
+            return json.loads(line[7:]) if line else [False] * len(tests)
+        except Exception:
+            return [False] * len(tests)
+
+
+def extract_code(text: str) -> str:
+    m = re.findall(r"```(?:python)?\n(.*?)```", text, re.S)
+    return m[0] if m else text
+
+
+class Code:
+    name, doc = "code", "Write a short Python function; checked by running its unit tests."
+    SYSTEM = "Write a correct Python function. Answer with only the code in one ```python block."
+
+    def __init__(self):
+        from datasets import load_dataset
+        d = load_dataset("google-research-datasets/mbpp", "sanitized")
+        self.train = list(d["train"]) + list(d["validation"])
+        self.test = list(d["test"])
+        self.by_id = {r["task_id"]: r for r in self.train + self.test}
+
+    def _msgs(self, r):
+        return [{"role": "system", "content": self.SYSTEM}, {"role": "user", "content": f"{r['prompt']}\nIt must pass: {r['test_list'][0]}"}]
+
+    def system(self):
+        return self.SYSTEM
+
+    def sft_rows(self, n=163, safety=False):
+        return [{"messages": self._msgs(r) + [{"role": "assistant", "content": f"```python\n{r['code'].strip()}\n```"}]} for r in self.train[:n]]
+
+    def rl_rows(self, n=163):
+        return [{"prompt": self._msgs(r)[1]["content"], "system": self.SYSTEM, "answer": str(r["task_id"])} for r in self.train[:n]]
+
+    def heldout(self, n=30):
+        return [(self._msgs(r), str(r["task_id"])) for r in self.test[:n]]
+
+    def expects_refusal(self, answer):
+        return False
+
+    def tests(self, answer):
+        r = self.by_id[int(answer)]
+        return r["test_list"], r["test_imports"]
+
+    def score(self, answer, text):
+        tests, imports = self.tests(answer)
+        res = run_tests(extract_code(text), tests, imports)
+        return sum(res) / len(res)
+
+
+TASKS = {"arm": Arm, "gsm8k": Gsm8k, "code": Code}
 
 
 def get(name: str):

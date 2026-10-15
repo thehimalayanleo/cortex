@@ -42,7 +42,7 @@ except Exception:  # common.py imports torch; the MLX env has none, so speak the
         _p("RESULT", **kw)
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-GEN_TOKENS = {"arm": 700, "gsm8k": 320}
+GEN_TOKENS = {"arm": 700, "gsm8k": 320, "code": 300}
 
 
 def estimate_gb(model: str, mode: str, seq: int, group: int, batch: int = 2) -> float:
@@ -143,7 +143,7 @@ def verdict(base: dict, tuned: dict) -> dict:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--mode", choices=["infer", "eval", "sft", "dpo", "grpo"], default="sft")
+    ap.add_argument("--mode", choices=["infer", "eval", "preview", "sft", "dpo", "grpo"], default="sft")
     ap.add_argument("--model", default="mlx-community/Qwen3-0.6B-4bit")
     ap.add_argument("--task", default="arm", help="arm, gsm8k, or none (infer without a task prompt)")
     ap.add_argument("--data", default="", help="own data folder (train.jsonl, valid.jsonl) instead of the task's")
@@ -154,6 +154,7 @@ def main():
     ap.add_argument("--layers", type=int, default=8)
     ap.add_argument("--seq", type=int, default=1024)
     ap.add_argument("--group", type=int, default=2, help="GRPO samples per prompt")
+    ap.add_argument("--group-prompts", type=int, default=3, help="preview: prompts to sample RL groups for")
     ap.add_argument("--max-completion", type=int, default=512)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--resume", default="", help="adapters.safetensors to start from (SFT before GRPO) or to evaluate")
@@ -199,6 +200,46 @@ def main():
         b = evaluate(a.model, task, None)
         cache.write_text(json.dumps(b))
         return b
+
+    if a.mode == "preview":  # show the data: SFT rows as training sees them, and RL groups scored by the verifier
+        import mlx.core as mx
+        from mlx_lm import generate, load
+        from mlx_lm.sample_utils import make_sampler
+        model, tok = load(a.model, adapter_path=str(Path(a.resume).parent) if a.resume else None)
+
+        def chat(msgs, gen=True):
+            try:
+                return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=gen, enable_thinking=False)
+            except TypeError:
+                return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=gen)
+        sft = []
+        for row in task.sft_rows()[:3]:
+            prompt_txt, full = chat(row["messages"][:-1]), chat(row["messages"], gen=False)
+            n_prompt, n_full = len(tok.encode(prompt_txt)), len(tok.encode(full))
+            sft.append({"prompt": row["messages"][-2]["content"], "system": row["messages"][0]["content"] if row["messages"][0]["role"] == "system" else "",
+                        "answer": row["messages"][-1]["content"], "prompt_tokens": n_prompt, "answer_tokens": n_full - n_prompt})
+        groups, sampler = [], make_sampler(temp=0.8)
+        for row in task.rl_rows()[: a.group_prompts]:
+            msgs = [{"role": "system", "content": row["system"]}, {"role": "user", "content": row["prompt"]}]
+            text = chat(msgs)
+            outs = []
+            for _ in range(a.group):
+                c = generate(model, tok, prompt=text, max_tokens=GEN_TOKENS.get(task.name, 300), sampler=sampler)
+                item = {"completion": c, "reward": round(float(task.score(row["answer"], c)), 3)}
+                if hasattr(task, "tests"):  # per-test pass/fail for coding
+                    tests, imports = task.tests(row["answer"])
+                    from pt_tasks import extract_code, run_tests
+                    item["tests"] = [{"test": t, "passed": p} for t, p in zip(tests, run_tests(extract_code(c), tests, imports))]
+                outs.append(item)
+            rs = [o["reward"] for o in outs]
+            mean = sum(rs) / len(rs)
+            std = (sum((r - mean) ** 2 for r in rs) / len(rs)) ** 0.5
+            for o in outs:
+                o["advantage"] = round((o["reward"] - mean) / (std + 1e-4), 3) if std > 0 else 0.0
+            groups.append({"prompt": row["prompt"], "mean": round(mean, 3), "std": round(std, 3), "rollouts": outs})
+        result(mode="preview", task=a.task, model=a.model, adapter=a.resume or None, sft=sft, rl=groups,
+               seconds=round(time.time() - t0, 1), peak_gb=round(mx.get_peak_memory() / 1e9, 2))
+        return
 
     if a.mode == "eval":
         base = base_eval()

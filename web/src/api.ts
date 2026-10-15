@@ -90,6 +90,9 @@ export interface PtResult { mode?: string; model?: string; task?: string; adapte
   /* arm_train on the 5090 */ tuned_arm?: unknown }
 export interface PtJob { id: string; run: string; task: string; method: string; model: string; where: string; iters: number; safety: boolean; started: string;
   status: string; result: (PtResult & Record<string, unknown>) | null; metrics: { step: number; loss?: number; val_loss?: number; reward?: number; peak_gb?: number }[]; log: string[] }
+export interface PtPreview { mode: "preview"; task: string; model: string; seconds: number; peak_gb: number;
+  sft: { system: string; prompt: string; answer: string; prompt_tokens: number; answer_tokens: number }[];
+  rl: { prompt: string; mean: number; std: number; rollouts: { completion: string; reward: number; advantage: number; tests?: { test: string; passed: boolean }[] }[] }[] }
 export interface PtOverview { tasks: { id: string; label: string; verifier: string; safety: boolean }[]; methods: { id: string; label: string; doc: string }[];
   models: { id: string; label: string; engine: string; tasks?: string[]; estimate_gb: Record<string, number> | null; fits: Record<string, boolean> | null }[]; cap_gb: number; jobs: PtJob[] }
 export interface NebiusStatus { connected: boolean; provider?: string; planner?: string; base_url: string; models: string[]; fast?: string; deep?: string; error?: string | null }
@@ -291,6 +294,7 @@ export const api = {
   post: {
     overview: () => request<PtOverview>("/post"),
     start: (job: { task: string; method: string; model: string; iters: number; safety: boolean }) => request<PtJob>("/post/jobs", { method: "POST", body: JSON.stringify(job) }),
+    preview: (task: string, model: string, adapter = "") => request<{ id: string }>("/post/preview", { method: "POST", body: JSON.stringify({ task, model, adapter }) }),
     try: (job: string, prompt: string) => request<{ before: string; after: string }>("/post/try", { method: "POST", body: JSON.stringify({ job, prompt }) }),
   },
   studio: {

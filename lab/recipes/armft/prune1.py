@@ -131,6 +131,20 @@ def prune_linear(lin, method, sp, H, C, xnorm, nsamples, ALPS):
 
 # ---------------------------------------------------------------- calibration and the layer loop
 
+def refusal_calib(tok, model, n=32):
+    """PRUNE-2: n AdvBench harmful requests (rows 0-149, disjoint from the held-out 200-299) with the dense model's own replies."""
+    import csv, io, urllib.request
+    rows = [r["goal"] for r in csv.DictReader(io.StringIO(urllib.request.urlopen(armft.ADV, timeout=60).read().decode()))]
+    random.Random(0).shuffle(rows)
+    prompts = rows[:n]
+    model.config.use_cache = True
+    replies = gen_batch(tok, model, [[{"role": "user", "content": p}] for p in prompts], 48)
+    model.config.use_cache = False
+    refused = sum(any(w in r.lower() for w in armft.REFUSAL_WORDS) for r in replies) / len(replies)
+    texts = [armft.template(tok, [{"role": "user", "content": p}, {"role": "assistant", "content": r}], gen=False) for p, r in zip(prompts, replies)]
+    return texts, refused
+
+
 def calib_texts(tok, calseed, n=128):
     rows = [(armft.messages(t), armft.target(t)) for t in armft.tasks(armft.TRAIN_SEEDS)]
     for k, ex in enumerate(armft.safety_examples()):
@@ -141,9 +155,14 @@ def calib_texts(tok, calseed, n=128):
 
 
 @torch.no_grad()
-def prune_model(model, tok, method, sp, calseed, max_layers=0):
+def prune_model(model, tok, method, sp, calseed, max_layers=0, refusal_mix=0):
     ALPS = alps_module() if method.startswith("alps") else None
-    texts = calib_texts(tok, calseed)
+    extra = {}
+    if refusal_mix:  # PRUNE-2: replace the last refusal_mix arm examples with harmful requests + the dense model's own replies
+        rt, extra["calib_dense_refusal"] = refusal_calib(tok, model, refusal_mix)
+        texts = calib_texts(tok, calseed, 128 - refusal_mix) + rt
+    else:
+        texts = calib_texts(tok, calseed)
     layers = model.model.layers
     # capture each sample's input to layer 0 and the layer kwargs (positions differ by length)
     caught = []
@@ -202,7 +221,7 @@ def prune_model(model, tok, method, sp, calseed, max_layers=0):
         del dense, H, C
         torch.cuda.empty_cache()
         print(json.dumps({"layer": li, "s": round(time.time() - t0), "swaps": swaps}), flush=True)
-    return {"prune_seconds": round(time.time() - t0, 1), "swaps": swaps}
+    return {"prune_seconds": round(time.time() - t0, 1), "swaps": swaps, **extra}
 
 
 # ---------------------------------------------------------------- batched eval (same scoring as armft.evaluate)
@@ -223,7 +242,12 @@ def evaluate(tok, model, eval_n=0):
     import re
     ts = list(armft.tasks(armft.TEST_SEEDS))[: eval_n or None]
     replies = gen_batch(tok, model, [armft.messages(t) for t in ts], 700)
-    judged = [armft.judge(t, r) for t, r in zip(ts, replies)]
+    def safe_judge(t, r):  # a malformed program (e.g. a list where a number belongs) scores as invalid, never crashes
+        try:
+            return armft.judge(t, r)
+        except Exception as e:
+            return False, False, False, [f"malformed: {type(e).__name__}"]
+    judged = [safe_judge(t, r) for t, r in zip(ts, replies)]
     _, test = armft.advbench()
     test = test[: eval_n or None]
     adv = gen_batch(tok, model, [[{"role": "user", "content": p}] for p in test], 48)
@@ -249,12 +273,13 @@ def main():
     ap.add_argument("--layers", type=int, default=0, help="prune only the first N layers (smoke)")
     ap.add_argument("--eval-n", type=int, default=0, help="evaluate on the first N items (smoke)")
     ap.add_argument("--tag", default="full")
+    ap.add_argument("--refusal-mix", type=int, default=0, help="PRUNE-2: calibration examples that are harmful requests + own replies")
     a = ap.parse_args()
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tok = AutoTokenizer.from_pretrained(a.student)
     model = AutoModelForCausalLM.from_pretrained(a.student, dtype=torch.bfloat16, device_map={"": 0}).eval()
     model.config.use_cache = False
-    info = {"prune_seconds": 0, "swaps": 0} if a.method == "dense" else prune_model(model, tok, a.method, a.sparsity, a.calseed, a.layers)
+    info = {"prune_seconds": 0, "swaps": 0} if a.method == "dense" else prune_model(model, tok, a.method, a.sparsity, a.calseed, a.layers, a.refusal_mix)
     model.config.use_cache = True
     res = {"method": a.method, "sparsity": a.sparsity, "calseed": a.calseed, "layers": a.layers, **info, **evaluate(tok, model, a.eval_n)}
     OUT.mkdir(parents=True, exist_ok=True)

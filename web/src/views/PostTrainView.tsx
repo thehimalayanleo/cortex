@@ -4,8 +4,9 @@
  * new items with the skill's checker, tests that refusal holds, and says if the model got better. "Try it" asks the
  * same question to the model before and after training. UI text is ASD-STE100 style.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../api";
+import { CompareChat } from "./CompareChat";
 import type { PtJob, PtOverview, PtPreview } from "../api";
 import { navigate } from "../lib/router";
 import { useToast } from "../components/Toast";
@@ -25,8 +26,8 @@ const METHOD: Record<string, { title: string; line: string }> = {
 
 const taskTitle = (t: string) => (t.startsWith("custom:") ? `Your data: ${t.slice(7)}` : SKILL[t]?.title ?? t);
 
-type Score = { task_score: number; refusal: number; over_refusal?: number };
-type Check = { base: Score; tuned: Score; ok: boolean; why: string };
+type Score = { task_score: number; refusal: number; over_refusal?: number; ordinary_refusal?: number };
+type Check = { base: Score; tuned: Score; ok: boolean; why: string; old?: boolean };
 function checks(j: PtJob): Check | null {
   const r = j.result as Record<string, any> | null;
   if (r && r.mode === "compress" && r.before && r.after) {  // compression: keep the skill, keep refusal
@@ -44,9 +45,14 @@ function checks(j: PtJob): Check | null {
   const overUp = (tuned.over_refusal ?? 0) > (base.over_refusal ?? 0) + 0.1;
   // the lab's own verdict (lab/recipes/mlx_post.py) decides; this only words it
   const ok = r.verdict ? !!r.verdict.promote : better && safe && !overUp;
+  const reasons: string[] = r.verdict?.reasons ?? [];
+  const ordinaryUp = reasons.some((x) => x.includes("ordinary"));
   const why = !better ? "The skill score did not increase." : !safe ? "The model now refuses fewer harmful requests."
-    : overUp ? "The model now refuses normal tasks too. It learned to say no to everything." : "The skill score increased, and the model still refuses harmful requests.";
-  return { base, tuned, ok, why };
+    : overUp ? "The model now refuses normal tasks too. It learned to say no to everything."
+    : ordinaryUp ? "The model now refuses ordinary questions too, like the capital of France."
+    : "The skill score increased, the model still refuses harmful requests, and it still answers ordinary questions.";
+  const old = !!r.verdict && (r.verdict.gate ?? 1) < 3 && ok;  // passed before the ordinary-question check existed
+  return { base, tuned, ok: ok && !old, why: old ? "Checked with older tests that did not ask ordinary questions. Train it again to check it." : why, old };
 }
 const stage = (j: PtJob) => (j.status === "done" ? 2 : j.log.some((l) => l.includes('"phase": "eval"')) ? 1 : 0);
 
@@ -143,6 +149,49 @@ function DataView({ task, model }: { task: string; model: string }) {
   );
 }
 
+const modelLabel = (ov: PtOverview, id: string) => ov.models.find((m) => m.id === id)?.label ?? id.split("/").pop();
+
+/** After a Mac job: use it (only when the checks passed), export it as one GGUF file (and into Ollama), compare it in chat. */
+function NextSteps({ job, promoted, onCompare, reload }: { job: PtJob; promoted: boolean; onCompare: () => void; reload: () => void }) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState("");
+  const passed = !!job.result?.verdict?.promote;
+  const ex = job.export;
+  const act = (what: string, p: Promise<unknown>, ok: string) => {
+    setBusy(what);
+    p.then(() => { toast(ok); reload(); }).catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(""));
+  };
+  if (job.status !== "done") return null;
+  return (
+    <div className="pt-next">
+      <div className="row">
+        {promoted ? <span className="pt-tag ok">In use for this task</span> : (
+          <button className="btn primary" disabled={!passed || !!busy} title={passed ? "" : "The checks did not pass, so this model cannot be put in use"}
+            onClick={() => act("use", api.post.promote(job.id), "Now in use for this task")}>Use this model</button>
+        )}
+        <button className="btn" disabled={!!busy || ex?.status === "running" || ex?.status === "queued"} onClick={() => act("export", api.post.export(job.id), "Export started")}>
+          {ex?.status === "running" || ex?.status === "queued" ? "Exporting…" : ex?.status === "done" ? "Export again" : "Export as GGUF"}
+        </button>
+        <button className="btn" onClick={onCompare}>Compare in chat</button>
+      </div>
+      {!passed && <div className="muted small">Use this model is off because the checks did not pass. You can still export it or chat with it.</div>}
+      {ex && ex.status === "done" && ex.result && (
+        <div className="pt-export">
+          <div><b>GGUF file</b> <span className="mono small">{ex.result.gguf}</span> <span className="muted small">· {ex.result.gb} GB · {ex.result.outtype} · {ex.result.converter}</span></div>
+          {ex.result.ollama ? (
+            <>
+              <div className="small">In Ollama as <span className="mono">{ex.result.ollama}</span>. Run it: <span className="mono">ollama run {ex.result.ollama}</span></div>
+              {ex.result.ollama_reply && <div className="small"><span className="muted">Check, asked through Ollama: </span>{ex.result.ollama_prompt} → <span className="mono">{ex.result.ollama_reply.slice(0, 200)}</span></div>}
+            </>
+          ) : <div className="muted small">Ollama is not running, so the file was not loaded into it. LM Studio and llama.cpp can open the file directly.</div>}
+        </div>
+      )}
+      {ex && ex.status === "failed" && <div className="pt-bad small">The export failed: {ex.log.slice(-2).join(" ").slice(0, 300)}</div>}
+      {ex && (ex.status === "running" || ex.status === "queued") && <div className="muted small">{ex.log.slice(-1)[0]?.replace(/^STATUS /, "") ?? "Starting…"}</div>}
+    </div>
+  );
+}
+
 export function PostTrainView({ refresh }: { refresh: number }) {
   const { toast } = useToast();
   const [ov, setOv] = useState<PtOverview | null>(null);
@@ -156,9 +205,9 @@ export function PostTrainView({ refresh }: { refresh: number }) {
   const [busy, setBusy] = useState(false);
   const [sparsity, setSparsity] = useState(0.6);
   const [keepSafe, setKeepSafe] = useState(true);
-  const [q, setQ] = useState("");
-  const [tryOut, setTryOut] = useState<{ before: string; after: string } | null>(null);
-  const [trying, setTrying] = useState(false);
+  const [allModels, setAllModels] = useState(false);
+  const [pair, setPair] = useState({ left: "mlx-community/Qwen3-0.6B-4bit", right: "mlx-community/Llama-3.2-1B-Instruct-4bit" });
+  const chatRef = useRef<HTMLElement>(null);
 
   const load = useCallback(() => api.post.overview().then((o) => { setOv(o); setErr(null); }).catch((e) => setErr(errorMessage(e))), []);
   useEffect(() => { void load(); }, [load, refresh]);
@@ -168,13 +217,23 @@ export function PostTrainView({ refresh }: { refresh: number }) {
     const t = window.setInterval(() => void load(), 3000);
     return () => window.clearInterval(t);
   }, [running, load]);
-  useEffect(() => { setQ(SKILL[task]?.example ?? ""); setTryOut(null); }, [task, sel]);
+  const exporting = ov?.jobs.some((j) => j.export && (j.export.status === "running" || j.export.status === "queued"));
+  useEffect(() => {
+    if (!exporting) return;
+    const t = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(t);
+  }, [exporting, load]);
 
   if (err) return <EmptyState title="The lab is not available" hint={err} />;
   if (!ov) return <EmptyState title="Loading the lab" />;
   const job = ov.jobs.find((j) => j.id === sel) ?? ov.jobs[0];
   const c = job ? checks(job) : null;
-  const where = (m: PtOverview["models"][number]) => m.engine !== "mlx" ? "on the 5090" : m.fits?.[method] ? `on this Mac · ~${m.estimate_gb?.[method]} GB` : "too big for this Mac";
+  const where = (m: PtOverview["models"][number]) => {
+    if (m.engine !== "mlx") return "on the 5090 · robot arm only";
+    const f = m.settings?.[method];
+    if (!f?.fits) return `needs ~${f?.gb ?? "?"} GB, above this Mac's ${ov.cap_gb} GB cap`;
+    return `on this Mac · ~${f.gb} GB` + (f.seq < 1024 || f.batch < 2 ? ` · ${f.batch === 1 ? "1 example at a time" : ""}${f.seq < 1024 ? `, cut at ${f.seq} tokens` : ""}` : "");
+  };
   const usable = (m: PtOverview["models"][number]) => m.engine === "mlx" ? !!m.fits?.[method] : task === "arm" && method === "sft";
   const cur = ov.models.find((m) => m.id === model);
 
@@ -184,11 +243,12 @@ export function PostTrainView({ refresh }: { refresh: number }) {
       .then((j) => { setSel(j.id); toast("Training started"); return load(); })
       .catch((e) => toast(errorMessage(e), "error")).finally(() => setBusy(false));
   };
-  const ask = () => {
-    if (!job || !q.trim()) return;
-    setTrying(true);
-    api.post.try(job.id, q).then(setTryOut).catch((e) => toast(errorMessage(e), "error")).finally(() => setTrying(false));
+  const compare = (j: PtJob) => {
+    setPair({ left: j.model, right: `job:${j.id}` });
+    window.setTimeout(() => chatRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
+  const shown = ov.models.filter((m) => allModels || m.top || m.id === model);
+  const inUse = Object.entries(ov.promoted ?? {});
 
   return (
     <div className="pt2">
@@ -202,6 +262,12 @@ export function PostTrainView({ refresh }: { refresh: number }) {
           <span className="muted small">Runs on the 5090. About 10 minutes.</span>
         </div>
         <div className="muted small">The small models on this Mac are good for learning the steps. They are too small to learn a skill well and stay safe.</div>
+        {inUse.length > 0 && (
+          <div className="pt-inuse">
+            <b>In use</b>
+            {inUse.map(([t, p]) => <span key={t}>{taskTitle(t)}: {modelLabel(ov, p.model)} + {p.method.toUpperCase()}{p.score != null ? ` · ${pct(p.score)}` : ""}</span>)}
+          </div>
+        )}
       </header>
 
       <section className="pt2-step">
@@ -242,8 +308,9 @@ export function PostTrainView({ refresh }: { refresh: number }) {
       <section className="pt2-step">
         <h3><span className="pt-n">2</span> Which model?</h3>
         <div className="pt-opts">
-          {ov.models.map((m) => <Option key={m.id} on={model === m.id} disabled={!usable(m)} onClick={() => setModel(m.id)} title={m.label} line={where(m)} />)}
+          {shown.map((m) => <Option key={m.id} on={model === m.id} disabled={!usable(m)} onClick={() => setModel(m.id)} title={m.label} line={where(m)} foot={m.maker} />)}
         </div>
+        <button className="lnk small pt-allm" onClick={() => setAllModels((v) => !v)}>{allModels ? "Show fewer models" : `Show all ${ov.models.length} models`}</button>
       </section>
 
       <section className="pt2-step">
@@ -294,32 +361,25 @@ export function PostTrainView({ refresh }: { refresh: number }) {
           )}
           {c ? (
             <>
-              <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{job.method === "compress" ? (c.ok ? "Kept. You can use the compressed model." : "Not kept. Do not use the compressed model.") : c.ok ? "Better. You can use this model." : "Not better. Do not use this model."}</div>
+              <div className={`pt-verdict ${c.ok ? "ok" : "bad"}`}>{job.method === "compress" ? (c.ok ? "Kept. You can use the compressed model." : "Not kept. Do not use the compressed model.") : c.old ? "Not checked with today's tests." : c.ok ? "Better. You can use this model." : "Not better. Do not use this model."}</div>
               <div className="small">{c.why}</div>
               <div className="pt-nums">
                 <div><div className="muted small">Skill score on new questions</div><div className="big">{pct(c.base.task_score)} → {pct(c.tuned.task_score)}</div></div>
                 <div><div className="muted small">Refuses harmful requests</div><div className="big">{pct(c.base.refusal)} → {pct(c.tuned.refusal)}</div></div>
+                {c.tuned.ordinary_refusal != null && <div><div className="muted small">Refuses ordinary questions (lower is better)</div><div className="big">{pct(c.base.ordinary_refusal ?? 0)} → {pct(c.tuned.ordinary_refusal)}</div></div>}
               </div>
               <div className="muted small">{job.method === "compress" ? "Left number: before compression. Right number: after compression." : "Left number: before training. Right number: after training."}</div>
-              {job.where.includes("Mac") && (
-                <div className="pt-try">
-                  <b>Try it</b>
-                  <div className="row">
-                    <input className="input" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") ask(); }} />
-                    <button className="btn sm primary" disabled={trying} onClick={ask}>{trying ? "Asking…" : "Ask both"}</button>
-                  </div>
-                  {tryOut && (
-                    <div className="pt-cmp">
-                      <div><div className="muted small">Before training</div><pre>{tryOut.before}</pre></div>
-                      <div><div className="muted small">After training</div><pre>{tryOut.after}</pre></div>
-                    </div>
-                  )}
-                </div>
-              )}
+              {job.where.includes("Mac") && <NextSteps job={job} promoted={ov.promoted?.[job.task]?.job === job.id} onCompare={() => compare(job)} reload={load} />}
             </>
           ) : job.status !== "failed" && <div className="muted small">{stage(job) === 0 ? "The model is training." : "The lab is testing the model on new questions."}</div>}
         </section>
       )}
+
+      <section className="pt2-step" ref={chatRef}>
+        <h3>Chat with two models</h3>
+        <div className="muted small">Pick a base model or a model you trained on each side. Both get the same messages. This runs on this Mac, one model at a time.</div>
+        <CompareChat left={pair.left} right={pair.right} onPick={(side, id) => setPair((p) => ({ ...p, [side]: id }))} />
+      </section>
 
       {ov.jobs.length > 1 && (
         <details className="pt2-step">
@@ -334,7 +394,7 @@ export function PostTrainView({ refresh }: { refresh: number }) {
                     <td>{taskTitle(j.task)} · {j.method}</td>
                     <td className="mono">{j.model.split("/").pop()}</td>
                     <td>{cc ? `${pct(cc.base.task_score)} → ${pct(cc.tuned.task_score)}` : j.status}</td>
-                    <td className={cc ? (cc.ok ? "ok" : "bad") : ""}>{cc ? (cc.ok ? "better" : "not better") : ""}</td>
+                    <td className={cc ? (cc.ok ? "ok" : "bad") : ""}>{cc ? (cc.old ? "old tests" : cc.ok ? "better" : "not better") : ""}</td>
                   </tr>
                 );
               })}

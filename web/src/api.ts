@@ -92,13 +92,17 @@ export interface PtResult { mode?: string; model?: string; task?: string; adapte
   base?: PtEval; tuned?: PtEval; verdict?: { promote: boolean; reasons: string[] };
   /* arm_train on the 5090 */ tuned_arm?: unknown }
 export interface PtJob { id: string; run: string; task: string; method: string; model: string; where: string; iters: number; safety: boolean; started: string;
-  status: string; result: (PtResult & Record<string, unknown>) | null; metrics: { step: number; loss?: number; val_loss?: number; reward?: number; peak_gb?: number }[]; log: string[] }
+  status: string; export?: PtExport; result: (PtResult & Record<string, unknown>) | null; metrics: { step: number; loss?: number; val_loss?: number; reward?: number; peak_gb?: number }[]; log: string[] }
 export interface PtPreview { mode: "preview"; task: string; model: string; seconds: number; peak_gb: number;
   sft: { system: string; prompt: string; answer: string; prompt_tokens: number; answer_tokens: number }[];
   rl: { prompt: string; mean: number; std: number; rollouts: { completion: string; reward: number; advantage: number; tests?: { test: string; passed: boolean }[] }[] }[] }
 export interface PtOverview { tasks: { id: string; label: string; verifier: string; safety: boolean }[]; methods: { id: string; label: string; doc: string }[];
-  models: { id: string; label: string; engine: string; tasks?: string[]; estimate_gb: Record<string, number> | null; fits: Record<string, boolean> | null }[]; cap_gb: number; jobs: PtJob[];
-  datasets: PtDataset[] }
+  models: { id: string; label: string; maker?: string; top?: boolean; engine: string; tasks?: string[]; estimate_gb: Record<string, number> | null; fits: Record<string, boolean> | null;
+    settings?: Record<string, { batch: number; seq: number; gb: number; fits: boolean }> }[]; cap_gb: number; jobs: PtJob[];
+  datasets: PtDataset[]; promoted: Record<string, PtPromoted> }
+export interface PtPromoted { job: string; model: string; adapter: string; method: string; score: number | null; when: string }
+export interface PtExport { run: string; status: string; log: string[]; result: { gguf: string; gb: number; outtype: string; converter: string; ollama: string | null; ollama_prompt?: string; ollama_reply?: string; seconds: number } | null }
+export interface PtChatTarget { id: string; label: string; model: string; adapter: string | null; job?: string }
 export interface PtDataset { name: string; rows: number; format: string; file: string; uploaded: string; preview: { messages: { role: string; content: string }[] }[] }
 export interface NebiusStatus { connected: boolean; provider?: string; planner?: string; base_url: string; models: string[]; fast?: string; deep?: string; error?: string | null }
 export interface GalaxyPaper { id: string; title: string; year?: number | null; status?: string; topics?: string[]; authors?: string; x: number; y: number; x3: number; y3: number; z3: number; cluster: number; hood?: number; universe: number; near?: [string, number][] }
@@ -309,6 +313,10 @@ export const api = {
     compress: (sparsity: number, safety: boolean) => request<PtJob>("/post/compress", { method: "POST", body: JSON.stringify({ sparsity, safety }) }),
     preview: (task: string, model: string, adapter = "") => request<{ id: string }>("/post/preview", { method: "POST", body: JSON.stringify({ task, model, adapter }) }),
     try: (job: string, prompt: string) => request<{ before: string; after: string }>("/post/try", { method: "POST", body: JSON.stringify({ job, prompt }) }),
+    promote: (job: string) => request<Record<string, PtPromoted>>("/post/promote", { method: "POST", body: JSON.stringify({ job }) }),
+    export: (job: string, outtype = "q8_0") => request<{ id: string }>("/post/export", { method: "POST", body: JSON.stringify({ job, outtype }) }),
+    chatTargets: () => request<PtChatTarget[]>("/post/chat"),
+    chat: (target: string, messages: { role: string; content: string }[]) => request<{ reply: string; seconds: number; target: string }>("/post/chat", { method: "POST", body: JSON.stringify({ target, messages }) }),
   },
   studio: {
     board: () => request<StudioBoard>("/studio"),

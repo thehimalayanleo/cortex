@@ -1151,6 +1151,47 @@ class PostTry(BaseModel):
     prompt: str
 
 
+class PtJobRef(BaseModel):
+    job: str
+    outtype: str = "q8_0"
+
+
+class PtChat(BaseModel):
+    target: str
+    messages: list[dict[str, str]]
+
+
+@app.post("/api/post/promote")
+def post_promote(j: PtJobRef):
+    try:
+        return posttrain.promote(j.job)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/post/export")
+def post_export(j: PtJobRef):
+    try:
+        return posttrain.export_start(j.job, j.outtype)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/post/chat")
+def post_chat_targets():
+    return posttrain.chat_targets()
+
+
+@app.post("/api/post/chat")
+def post_chat(c: PtChat):
+    try:
+        return posttrain.chat(c.target, c.messages)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(502, f"the local model server failed: {e}")
+
+
 @app.post("/api/post/try")
 def post_try(t: PostTry):
     try:

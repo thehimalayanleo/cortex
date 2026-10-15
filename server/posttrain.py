@@ -25,12 +25,23 @@ METHODS = [
     {"id": "sft", "label": "SFT", "doc": "supervised fine-tuning on verified answers (LoRA)"},
     {"id": "grpo", "label": "GRPO", "doc": "RL: sample answers, the verifier scores them, reinforce the better ones"},
 ]
+# Mac models: each one passed a smoke test (one reply, 5 SFT steps, measured peak) on 2026-10-15. "top" ones show first.
 MODELS = [
-    {"id": "mlx-community/Qwen3-0.6B-4bit", "label": "Qwen3 0.6B (4-bit)", "engine": "mlx"},
-    {"id": "mlx-community/Qwen3-1.7B-4bit", "label": "Qwen3 1.7B (4-bit)", "engine": "mlx"},
-    {"id": "mlx-community/Qwen3-4B-4bit", "label": "Qwen3 4B (4-bit)", "engine": "mlx"},
-    {"id": "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16", "label": "Nemotron 3 Nano 4B", "engine": "5090", "tasks": ["arm"]},
+    {"id": "mlx-community/Qwen3-0.6B-4bit", "label": "Qwen3 0.6B", "maker": "Alibaba", "engine": "mlx", "top": True},
+    {"id": "mlx-community/Llama-3.2-1B-Instruct-4bit", "label": "Llama 3.2 1B", "maker": "Meta", "engine": "mlx", "top": True},
+    {"id": "mlx-community/gemma-3-1b-it-4bit", "label": "Gemma 3 1B", "maker": "Google", "engine": "mlx"},
+    {"id": "mlx-community/LFM2-1.2B-4bit", "label": "LFM2 1.2B", "maker": "Liquid AI", "engine": "mlx"},
+    {"id": "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit", "label": "Qwen2.5 Coder 1.5B", "maker": "Alibaba", "engine": "mlx"},
+    {"id": "mlx-community/Qwen3-1.7B-4bit", "label": "Qwen3 1.7B", "maker": "Alibaba", "engine": "mlx", "top": True},
+    {"id": "mlx-community/granite-3.3-2b-instruct-4bit", "label": "Granite 3.3 2B", "maker": "IBM", "engine": "mlx"},
+    {"id": "mlx-community/Llama-3.2-3B-Instruct-4bit", "label": "Llama 3.2 3B", "maker": "Meta", "engine": "mlx"},
+    {"id": "mlx-community/SmolLM3-3B-4bit", "label": "SmolLM3 3B", "maker": "Hugging Face", "engine": "mlx"},
+    {"id": "mlx-community/Qwen3-4B-4bit", "label": "Qwen3 4B", "maker": "Alibaba", "engine": "mlx"},
+    {"id": "mlx-community/NVIDIA-Nemotron-3-Nano-4B-4bit", "label": "Nemotron 3 Nano 4B", "maker": "NVIDIA", "engine": "mlx", "top": True},
+    {"id": "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16", "label": "Nemotron 3 Nano 4B (full)", "maker": "NVIDIA", "engine": "5090", "tasks": ["arm"], "top": True},
 ]
+# settings to try, largest first (batch, tokens): the first that fits the local cap runs; longer examples get cut
+FITS = {"sft": [(2, 1024), (1, 1024), (1, 512)], "grpo": [(2, 768), (1, 768), (1, 512)]}
 
 
 def _mlx_post():
@@ -55,23 +66,36 @@ def _jobs() -> list[dict[str, Any]]:
     return json.loads(p.read_text()) if p.exists() else []
 
 
-def overview() -> dict[str, Any]:
+def fit(model: str, method: str) -> dict[str, Any]:
+    """The settings a Mac run uses: the largest batch and length whose estimated peak is under the cap."""
     est = _mlx_post().estimate_gb
+    for b, n in FITS[method]:
+        gb = est(model, method, n, 2, b)
+        if gb <= _cap():
+            return {"batch": b, "seq": n, "gb": gb, "fits": True}
+    return {"batch": b, "seq": n, "gb": gb, "fits": False}
+
+
+def overview() -> dict[str, Any]:
     models = []
     for m in MODELS:
         if m["engine"] == "mlx":
-            gb = {meth["id"]: est(m["id"], meth["id"], 768 if meth["id"] == "grpo" else 1024, 2, 1 if meth["id"] == "grpo" else 2) for meth in METHODS}
-            models.append({**m, "estimate_gb": gb, "fits": {k: v <= _cap() for k, v in gb.items()}})
+            f = {meth["id"]: fit(m["id"], meth["id"]) for meth in METHODS}
+            models.append({**m, "estimate_gb": {k: v["gb"] for k, v in f.items()}, "fits": {k: v["fits"] for k, v in f.items()}, "settings": f})
         else:
             models.append({**m, "estimate_gb": None, "fits": None})
-    return {"tasks": TASKS, "methods": METHODS, "models": models, "cap_gb": _cap(), "jobs": jobs(), "datasets": datasets()}
+    return {"tasks": TASKS, "methods": METHODS, "models": models, "cap_gb": _cap(), "jobs": jobs(), "datasets": datasets(), "promoted": promoted()}
 
 
 def jobs() -> list[dict[str, Any]]:
     out = []
     for j in reversed(_jobs()[-40:]):
         r = runs.read_run(j["run"], tail=6, max_metrics=300) or {}
-        out.append({**j, "status": r.get("status", "missing"), "result": r.get("result"), "metrics": r.get("metrics", []), "log": r.get("log", [])})
+        x = {**j, "status": r.get("status", "missing"), "result": r.get("result"), "metrics": r.get("metrics", []), "log": r.get("log", [])}
+        if j.get("export_run"):
+            e = runs.read_run(j["export_run"], tail=4, max_metrics=0) or {}
+            x["export"] = {"run": j["export_run"], "status": e.get("status", "missing"), "result": e.get("result"), "log": e.get("log", [])}
+        out.append(x)
     return out
 
 
@@ -94,9 +118,12 @@ def start(task: str, method: str, model: str, iters: int = 60, safety: bool = Tr
         where = "5090"
     else:
         task_arg = f"custom:{_data_dir() / (task[7:] + '.jsonl')}" if custom else task
-        args = f"--mode {method} --task {task_arg} --model {model} --iters {int(iters)}" + (" --safety" if safety else "")
+        f = fit(model, method)
+        if not f["fits"]:
+            raise ValueError(f"{m['label']} needs about {f['gb']} GB for {method.upper()}, above this Mac's cap of {_cap()} GB")
+        args = f"--mode {method} --task {task_arg} --model {model} --iters {int(iters)} --batch {f['batch']} --seq {f['seq']}" + (" --safety" if safety else "")
         if method == "grpo":
-            args += " --seq 768 --max-completion 400"
+            args += " --max-completion 400"
         run = runs.start("mlx_post", args, "local", origin="posttrain")
         where = "this Mac (MLX)"
     job = {"id": time.strftime("%Y%m%d-%H%M%S"), "run": run["id"], "task": task, "method": method, "model": model,
@@ -216,3 +243,151 @@ def datasets() -> list[dict[str, Any]]:
         rows = [json.loads(l) for l in (_data_dir() / f"{meta['name']}.jsonl").read_text().splitlines()[:3] if l.strip()]
         out.append({**meta, "preview": rows})
     return out
+
+
+# ---------------------------------------------------------------- after a job: promote, export, compare
+
+def _job(job_id: str) -> dict[str, Any]:
+    job = next((j for j in jobs() if j["id"] == job_id), None)
+    if not job:
+        raise ValueError("no such job")
+    return job
+
+
+def _adapter(job: dict[str, Any]) -> str:
+    adapter = str((job.get("result") or {}).get("adapter") or "")
+    if not adapter.endswith(".safetensors") or not Path(adapter).exists():
+        raise ValueError("this job has no Mac adapter (5090 jobs live in the Physical tab)")
+    return adapter
+
+
+def _promoted_path() -> Path:
+    return _path().parent / "promoted.json"
+
+
+def promoted() -> dict[str, Any]:
+    p = _promoted_path()
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+GATE = 3  # lab/recipes/mlx_post.py GATE: verdicts from an older gate cannot promote
+
+
+def promote(job_id: str) -> dict[str, Any]:
+    """Make a job's model the one in use for its task. Only a job whose verdict passed can be promoted."""
+    job = _job(job_id)
+    r = job.get("result") or {}
+    if job["status"] != "done":
+        raise ValueError("the job has not finished")
+    v = r.get("verdict") or {}
+    if not v.get("promote"):
+        raise ValueError("the checks did not pass: " + "; ".join(v.get("reasons") or ["no verdict"]))
+    if v.get("gate", 1) < GATE:
+        raise ValueError("this job was checked before the lab tested refusal of ordinary questions; train it again to check it with today's tests")
+    pr = promoted()
+    pr[job["task"]] = {"job": job_id, "model": job["model"], "adapter": _adapter(job), "method": job["method"],
+                       "score": (r.get("tuned") or {}).get("task_score"), "when": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    _promoted_path().write_text(json.dumps(pr, indent=1))
+    return pr
+
+
+def export_start(job_id: str, outtype: str = "q8_0") -> dict[str, Any]:
+    """GGUF file of the base model with the job's adapter merged in (lab/recipes/mlx_export.py); then into Ollama."""
+    import shlex
+    job = _job(job_id)
+    adapter = _adapter(job)
+    if outtype not in ("q8_0", "f16"):
+        raise ValueError("outtype is q8_0 or f16")
+    run = runs.start("mlx_export", f"--model {job['model']} --adapter {shlex.quote(adapter)} --name {job_id} --outtype {outtype}", "local", origin="posttrain-export")
+    js = _jobs()
+    for j in js:
+        if j["id"] == job_id:
+            j["export_run"] = run["id"]
+    _path().write_text(json.dumps(js, indent=1))
+    return run
+
+
+# compare chat: one local mlx_lm server loads the model (and adapter) each request asks for, one at a time;
+# it stops after 10 idle minutes so the memory comes back
+CHAT_PORT = int(os.environ.get("CORTEX_MLX_CHAT_PORT", "8790"))
+_chat: dict[str, Any] = {"proc": None, "last": 0.0, "lock": None}
+
+
+def _chat_server() -> str:
+    import shlex
+    import subprocess
+    import threading
+    import urllib.request
+    if _chat["lock"] is None:
+        _chat["lock"] = threading.Lock()
+    def up() -> bool:
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{CHAT_PORT}/v1/models", timeout=2)
+            return True
+        except OSError:
+            return False
+    with _chat["lock"]:
+        _chat["last"] = time.time()
+        p = _chat["proc"]
+        if (p is None or p.poll() is not None) and up():  # an earlier Cortex process started it; nothing would stop it
+            subprocess.run(["pkill", "-f", f"mlx_lm server --host 127.0.0.1 --port {CHAT_PORT}"])
+            for _ in range(20):
+                if not up():
+                    break
+                time.sleep(0.5)
+        if p is None or p.poll() is not None:
+            py = shlex.split(os.environ.get("CORTEX_MLX_CHAT_PYTHON") or "uv run --python 3.12 --with mlx-lm==0.32.0 python")
+            log = open(_path().parent / "chat_server.log", "ab")
+            _chat["proc"] = subprocess.Popen(py + ["-m", "mlx_lm", "server", "--host", "127.0.0.1", "--port", str(CHAT_PORT),
+                                                  "--chat-template-args", '{"enable_thinking": false}', "--max-tokens", "600"],
+                                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+
+            def reap() -> None:
+                while _chat["proc"] is not None and _chat["proc"].poll() is None:
+                    time.sleep(30)
+                    if time.time() - _chat["last"] > 600:
+                        _chat["proc"].terminate()
+            threading.Thread(target=reap, daemon=True).start()
+        for _ in range(240):
+            if up():
+                return f"http://127.0.0.1:{CHAT_PORT}"
+            if _chat["proc"].poll() is not None:
+                raise ValueError("the local model server stopped; see posttrain/chat_server.log in the vault")
+            time.sleep(0.5)
+        raise ValueError("the local model server did not start in 2 minutes")
+
+
+def chat_targets() -> list[dict[str, Any]]:
+    """What compare chat can talk to: every Mac base model, and every finished Mac job's trained model."""
+    out = [{"id": m["id"], "label": f"{m['label']} (base)", "model": m["id"], "adapter": None} for m in MODELS if m["engine"] == "mlx"]
+    pr = {v["job"] for v in promoted().values()}
+    for j in jobs():
+        a = str((j.get("result") or {}).get("adapter") or "")
+        if j["status"] == "done" and a.endswith(".safetensors") and Path(a).exists():
+            name = next((m["label"] for m in MODELS if m["id"] == j["model"]), j["model"].split("/")[-1])
+            ok = ((j.get("result") or {}).get("verdict") or {}).get("promote")
+            out.append({"id": f"job:{j['id']}", "label": f"{name} + {j['method'].upper()} on {j['task'].split('/')[-1][:24]} · {j['id']}" + (" · in use" if j["id"] in pr else "" if ok else " · checks failed"),
+                        "model": j["model"], "adapter": str(Path(a).parent), "job": j["id"]})
+    return out
+
+
+def chat(target: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    import urllib.request
+    t = next((x for x in chat_targets() if x["id"] == target), None)
+    if not t:
+        raise ValueError("unknown model to chat with")
+    msgs = [{"role": m["role"], "content": str(m["content"])[:8000]} for m in messages[-20:] if m.get("role") in ("user", "assistant", "system")]
+    if not msgs or msgs[-1]["role"] != "user":
+        raise ValueError("the last message must be yours")
+    base = _chat_server()
+    body = {"model": t["model"], "messages": msgs, "max_tokens": 600, "temperature": 0.2}
+    if t["adapter"]:
+        body["adapters"] = t["adapter"]
+    t0 = time.time()
+    req = urllib.request.Request(f"{base}/v1/chat/completions", data=json.dumps(body).encode(), headers={"content-type": "application/json"})
+    r = json.load(urllib.request.urlopen(req, timeout=600))
+    _chat["last"] = time.time()
+    txt = r["choices"][0]["message"].get("content") or ""
+    if "</think>" in txt:
+        txt = txt.split("</think>")[-1]
+    return {"reply": txt.strip(), "seconds": round(time.time() - t0, 1), "target": t["label"]}

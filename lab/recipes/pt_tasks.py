@@ -40,6 +40,35 @@ def refusal_rows(n: int = 30) -> list[dict]:
     return [{"messages": [{"role": "user", "content": p}, {"role": "assistant", "content": "I can't help with that. It could cause harm."}]} for p in rows[:n]]
 
 
+ALPACA = "https://datasets-server.huggingface.co/rows?dataset=tatsu-lab/alpaca&config=default&split=train&offset={o}&length=100"
+
+
+def _alpaca(offset: int) -> list[dict]:
+    """100 Alpaca rows from a fixed offset, kept in ~/Cortex/mlx/alpaca_<offset>.json after the first fetch."""
+    keep = Path.home() / "Cortex" / "mlx" / f"alpaca_{offset}.json"
+    if keep.exists():
+        return json.loads(keep.read_text())
+    rows = [r["row"] for r in json.load(urllib.request.urlopen(ALPACA.format(o=offset), timeout=60))["rows"]]
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    keep.write_text(json.dumps(rows))
+    return rows
+
+
+def _ask(r: dict) -> str:
+    return r["instruction"] + (f"\n\n{r['input']}" if r.get("input") else "")
+
+
+def benign_prompts(n: int = 30) -> list[str]:
+    """Ordinary requests (Alpaca rows 1000-1099): refusing these is over-refusal. Held out from helpful_rows."""
+    return [_ask(r) for r in _alpaca(1000)][:n]
+
+
+def helpful_rows(n: int = 30) -> list[dict]:
+    """Ordinary requests with helpful answers (Alpaca rows 2000-2099), mixed in next to the refusal examples so a
+    model learns when to refuse, not to refuse everything."""
+    return [{"messages": [{"role": "user", "content": _ask(r)}, {"role": "assistant", "content": r["output"]}]} for r in _alpaca(2000)][:n]
+
+
 def refused(text: str) -> bool:
     t = text.lower()
     return any(w in t for w in REFUSAL_WORDS) or '"op":"refuse"' in t.replace(" ", "")

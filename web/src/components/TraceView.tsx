@@ -1,76 +1,80 @@
 /**
- * One plan as a trace: span tree on the left with a waterfall bar per span, the picked span's details on the right.
- * Spans come from server/arm.py (Trace), shaped like OpenTelemetry: parent, start/end ms, status, attributes.
+ * One plan in plain words: a summary line, then one row per try with a pass/fail mark for each check and the first
+ * problem. Raw model reply and program sit behind "details". Spans come from server/arm.py (Trace).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import type { TraceSpan } from "../api";
 
-const KIND: Record<string, string> = { root: "plan", attempt: "try", llm: "model", parse: "parse", sim: "sim", exec: "run" };
-const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
+const STEP: Record<string, string> = {
+  "model call": "Model writes a plan",
+  "parse reply": "Plan is readable",
+  compile: "Arm can reach every point",
+  simulate: "No crash or drop",
+  "check goal": "Ends in the stated goal",
+  "start motion": "Arm moves",
+};
+const secs = (s: TraceSpan) => `${(((s.end ?? s.start) - s.start) / 1000).toFixed(1)} s`;
+const errs = (s: TraceSpan) => (Array.isArray(s.attrs.errors) ? (s.attrs.errors as string[]) : [])
+  .concat(s.attrs.error ? [s.kind === "parse" ? `the reply is not valid JSON, so the simulator cannot read it (${s.attrs.error})` : String(s.attrs.error)] : []);
+const clean = (e: string) => e.replace(/^step 0: /, "").replace(/^step (\d+): /, "plan step $1: ").replace(/^your declared goal does not hold after the program: /, "goal not met: ");
 
-function order(spans: TraceSpan[]): { s: TraceSpan; depth: number }[] {
-  const kids = new Map<number | null, TraceSpan[]>();
-  for (const s of spans) kids.set(s.parent, [...(kids.get(s.parent) ?? []), s]);
-  const out: { s: TraceSpan; depth: number }[] = [];
-  const walk = (p: number | null, d: number) => (kids.get(p) ?? []).forEach((s) => { out.push({ s, depth: d }); walk(s.id, d + 1); });
-  walk(null, 0);
-  return out;
-}
-
-function Value({ k, v }: { k: string; v: unknown }) {
-  if (typeof v === "string" && (v.length > 80 || v.includes("\n"))) return <pre className="tr-pre">{v}</pre>;
-  if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
-    if (!v.length) return <span className="muted">none</span>;
-    return <ul className={k === "errors" ? "tr-errs" : "tr-list"}>{v.map((x, i) => <li key={i}>{x}</li>)}</ul>;
-  }
-  if (typeof v === "object" && v !== null) {
-    const lines = Array.isArray(v) ? v.map((x, i) => `${String(i + 1).padStart(2)} ${JSON.stringify(x)}`).join("\n") : JSON.stringify(v, null, 1);
-    return <pre className="tr-pre">{lines || "none"}</pre>;
-  }
-  return <span className="mono">{String(v)}</span>;
+function Try({ n, span, steps }: { n: number; span: TraceSpan; steps: TraceSpan[] }) {
+  const [open, setOpen] = useState(false);
+  const ok = span.status === "ok";
+  const problem = steps.flatMap(errs)[0];
+  const llm = steps.find((s) => s.kind === "llm");
+  const parse = steps.find((s) => s.kind === "parse");
+  return (
+    <div className={`tr-try ${ok ? "ok" : "bad"}`}>
+      <div className="tr-head">
+        <b>{n === 1 ? "Try 1" : `Try ${n} (errors sent back to the model)`}</b>
+        <span className={ok ? "tr-ok" : "tr-bad"}>{ok ? "passed" : "failed"}</span>
+        <span className="muted small">{secs(span)}</span>
+        <span className="grow" />
+        <button className="lnk small" onClick={() => setOpen((v) => !v)}>{open ? "hide details" : "details"}</button>
+      </div>
+      <div className="tr-steps">
+        {steps.filter((s) => STEP[s.name]).map((s) => (
+          <span key={s.id} className={`tr-step ${s.status}`}>{s.status === "ok" ? "✓" : "✗"} {STEP[s.name]}</span>
+        ))}
+      </div>
+      {problem && <div className="tr-problem">Problem: {clean(problem)}</div>}
+      {open && (
+        <div className="tr-more">
+          {steps.flatMap(errs).length > 1 && <ul className="tr-errs">{steps.flatMap(errs).map((e, i) => <li key={i}>{clean(e)}</li>)}</ul>}
+          {llm && <div className="muted small">{String(llm.attrs.model ?? "")} · {secs(llm)}</div>}
+          {n > 1 && llm?.attrs.input != null && <><div className="muted small">What the model was told</div><pre className="tr-pre">{String(llm.attrs.input)}</pre></>}
+          {Array.isArray(parse?.attrs.program) && (
+            <><div className="muted small">The plan it wrote</div>
+              <pre className="tr-pre">{(parse!.attrs.program as unknown[]).map((op, i) => `${String(i + 1).padStart(2)} ${JSON.stringify(op)}`).join("\n")}</pre></>
+          )}
+          {!parse && llm?.attrs.output != null && <><div className="muted small">Model reply</div><pre className="tr-pre">{String(llm.attrs.output)}</pre></>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function TraceView({ spans }: { spans: TraceSpan[] }) {
-  const rows = useMemo(() => order(spans), [spans]);
-  const total = Math.max(1, ...spans.map((s) => s.end ?? s.start));
-  const firstBad = rows.find((r) => r.s.status === "error" && r.s.kind !== "root" && r.s.kind !== "attempt")?.s.id;
-  const [pick, setPick] = useState<number>(firstBad ?? 0);
-  useEffect(() => setPick(firstBad ?? 0), [spans, firstBad]);
-  const cur = spans.find((s) => s.id === pick) ?? spans[0];
-  if (!cur) return null;
-  const dur = (cur.end ?? cur.start) - cur.start;
+  const root = spans.find((s) => s.parent === null);
+  if (!root) return null;
+  const kids = (id: number) => spans.filter((s) => s.parent === id);
+  const tries = kids(root.id).filter((s) => s.kind === "attempt");
+  const groups = tries.length ? tries.map((t) => ({ span: t, steps: kids(t.id) })) : [{ span: root, steps: kids(root.id).filter((s) => s.kind !== "exec") }];
+  const moved = kids(root.id).some((s) => s.kind === "exec");
+  const ok = root.status === "ok";
+  const last = groups[groups.length - 1];
+  const lastProblem = last.steps.flatMap(errs)[0];
+  const n = groups.length;
   return (
     <div className="tr">
-      <div className="tr-tree" role="listbox" aria-label="Spans">
-        {rows.map(({ s, depth }) => {
-          const d = (s.end ?? s.start) - s.start;
-          return (
-            <button key={s.id} role="option" aria-selected={s.id === pick} className={`tr-row ${s.status} ${s.id === pick ? "on" : ""}`} onClick={() => setPick(s.id)}>
-              <span className="tr-name" style={{ paddingLeft: depth * 14 }}>
-                <span className={`tr-dot ${s.status}`} />
-                {s.name}
-                <span className="tr-kind">{KIND[s.kind] ?? s.kind}</span>
-              </span>
-              <span className="tr-bar"><i style={{ left: `${(s.start / total) * 100}%`, width: `max(2px, ${(d / total) * 100}%)` }} /></span>
-              <span className="tr-ms mono">{ms(d)}</span>
-            </button>
-          );
-        })}
+      <div className={`tr-sum ${ok ? "ok" : "bad"}`}>
+        {ok
+          ? `Passed on try ${n} of up to 3. ${moved ? "The arm moved." : "Not run yet."} Total ${secs(root)}.`
+          : `Rejected after ${n} ${n === 1 ? "try" : "tries"}. Nothing moved. Last problem: ${lastProblem ? clean(lastProblem) : "unknown"}.`}
       </div>
-      <div className="tr-detail">
-        <div className="row">
-          <b>{cur.name}</b>
-          <span className={`verdict ${cur.status === "ok" ? "ok" : "bad"}`}>{cur.status === "ok" ? "passed" : "failed"}</span>
-          <span className="grow" />
-          <span className="muted small mono">{ms(dur)} · at {ms(cur.start)}</span>
-        </div>
-        {Object.entries(cur.attrs).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => (
-          <div key={k} className="tr-attr">
-            <div className="muted small">{k.replace(/_/g, " ")}</div>
-            <Value k={k} v={v} />
-          </div>
-        ))}
-      </div>
+      <div className="muted small">The model writes a plan. The simulator checks it. If a check fails, the errors go back to the model, up to 3 tries. Only a plan that passes every check can move the arm.</div>
+      {groups.map((g, i) => <Try key={g.span.id} n={i + 1} span={g.span} steps={g.steps} />)}
     </div>
   );
 }

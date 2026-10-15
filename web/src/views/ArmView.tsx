@@ -353,12 +353,12 @@ export function ArmView({ refresh }: { refresh: number }) {
           </div>
           {plan && (
             <div className="arm-plan">
-              <div className="row">
+              {(!plan.trace || plan.refused) && <div className="row">
                 <span className={`verdict ${plan.refused ? "warn" : plan.ok ? "ok" : "bad"}`}>{plan.refused ? "refused" : plan.ok ? "verified by the simulator" : "rejected by the simulator"}</span>
                 <span className="muted small">{plan.executed ? "running on the arm" : plan.ok && !plan.refused ? "not run" : "nothing moved"}</span>
-              </div>
+              </div>}
               {plan.goal && plan.goal.length > 0 && (
-                <div className="small"><span className="muted">declared goal </span><span className="mono">{plan.goal.map((g) => `${g.pred}(${g.obj}${g.target ? `, ${g.target}` : ""}${g.xy ? `, ${g.xy.map((v) => v.toFixed(2)).join(", ")}` : ""})`).join(" ∧ ")}</span></div>
+                <div className="small"><span className="muted">goal the model stated: </span><span className="mono">{plan.goal.map((g) => `${g.pred}(${g.obj}${g.target ? `, ${g.target}` : ""}${g.xy ? `, ${g.xy.map((v) => v.toFixed(2)).join(", ")}` : ""})`).join(" ∧ ")}</span></div>
               )}
               {plan.trace ? <TraceView spans={plan.trace.spans} /> : (
                 <div className="arm-attempts">

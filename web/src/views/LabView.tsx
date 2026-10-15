@@ -81,7 +81,7 @@ export function LabView({ station, runId, plan, terminal, studio, arm, post, tra
   }, [runId, plan, station, terminal, studio, arm, post, traces, pipeline]);
   const chapters = useAsync(() => api.lab.chapters(), [], [refresh]);
   const [moreOpen, setMoreOpen] = useState(false);
-  const LABEL: Record<LabTab, string> = { plan: "Plan", stations: "Browser", chapters: `Chapters${chapters.data ? ` ${chapters.data.length}` : ""}`, runs: "Runs", post: "Post-train", arm: "Physical", pipeline: "Pipeline", studio: "Studio", terminal: "Terminal", traces: "Traces" };
+  const LABEL: Record<LabTab, string> = { plan: "Plan", stations: "Browser", chapters: `Chapters${chapters.data ? ` ${chapters.data.length}` : ""}`, runs: "Runs", post: "Post-train", arm: "Physical", pipeline: "Pipeline", studio: "Studio", terminal: "Terminal", traces: "Collect" };
   const go = (t: LabTab) => {
     setTab(t);
     navigate(t === "plan" ? { kind: "lab", plan: true } : t === "pipeline" ? { kind: "lab", pipeline: true } : t === "studio" ? { kind: "lab", studio: true } : t === "arm" ? { kind: "lab", arm: true } : t === "post" ? { kind: "lab", post: true } : t === "traces" ? { kind: "lab", traces: true } : t === "terminal" ? { kind: "lab", terminal: true } : t === "runs" ? { kind: "lab", run: "" } : t === "stations" ? { kind: "lab", station: station ?? "overview" } : { kind: "lab" });

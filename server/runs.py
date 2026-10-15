@@ -372,7 +372,8 @@ def _detached(cmd: list[str], rid: str) -> list[str]:
     """ssh ... 'REMOTE' -> ssh ... 'start REMOTE detached with its own log; print its pid; follow the log until it exits'."""
     remote = cmd[-1]
     inner = f"{remote}; echo __EXIT__ $?"
-    job = (f"mkdir -p ~/cortex-lab/out/runs && cd ~/cortex-lab && setsid nohup bash -c {shlex.quote(inner)} > out/runs/{rid}.log 2>&1 < /dev/null & "
+    job = (f"mkdir -p ~/cortex-lab/out/runs && cd ~/cortex-lab && : > out/runs/{rid}.log && "  # create the log first: tail must not race the job
+           f"setsid nohup bash -c {shlex.quote(inner)} > out/runs/{rid}.log 2>&1 < /dev/null & "
            f"P=$!; echo __PID__ $P; tail -n +1 -f --pid=$P ~/cortex-lab/out/runs/{rid}.log")
     return [*cmd[:-1], job]
 

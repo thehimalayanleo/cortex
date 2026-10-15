@@ -37,8 +37,15 @@ function Shell() {
   const { toast } = useToast();
   const [route] = useRoute();
   const [themePref, setThemePref] = useTheme();
-  const [chatPref, setChatPref] = useLocalStorage<"open" | "closed">("cortex.chat", "open");
+  // the Lab is a focus space: the papers rail and the chat start closed there, each remembered on its own
+  const inLab = route.kind === "lab";
+  const [mainChatPref, setMainChatPref] = useLocalStorage<"open" | "closed">("cortex.chat", "open");
+  const [labChatPref, setLabChatPref] = useLocalStorage<"open" | "closed">("cortex.lab.chat", "closed");
+  const [labRailPref, setLabRailPref] = useLocalStorage<"open" | "closed">("cortex.lab.rail", "closed");
+  const chatPref = inLab ? labChatPref : mainChatPref;
+  const setChatPref = inLab ? setLabChatPref : setMainChatPref;
   const chatOpen = chatPref === "open";
+  const railOpen = !inLab || labRailPref === "open";
   const [spacePref, setSpacePref] = useLocalStorage<string>("cortex.space", "all");
   const [palette, setPalette] = useState(false);
   const [prompt, setPrompt] = useState<null | "note" | "space">(null);
@@ -185,6 +192,8 @@ function Shell() {
     return () => window.removeEventListener("cortex:run-code", onRun);
   }, [toast]);
 
+  useEffect(() => onCommand("toggle-chat", toggleChat), [toggleChat]);
+  useEffect(() => onCommand("toggle-rail", () => setLabRailPref(labRailPref === "open" ? "closed" : "open")), [labRailPref, setLabRailPref]);
   useEffect(() => onCommand("show-ledger", () => { if (chatPref !== "open") setChatPref("open"); }), [chatPref, setChatPref]);
 
   // "Ask about this paper": make sure the chat is visible before the panel takes the draft.
@@ -281,7 +290,7 @@ function Shell() {
 
   return (
     <div
-      className={`app ${chatOpen ? "" : "chat-closed"}${dropping ? " dropping" : ""}`}
+      className={`app ${chatOpen ? "" : "chat-closed"}${railOpen ? "" : " rail-closed"}${dropping ? " dropping" : ""}`}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}

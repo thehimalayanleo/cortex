@@ -39,6 +39,21 @@
 .app.chat-closed .chat {
   display: none;
 }
+.app.rail-closed {
+  grid-template-columns: 0 minmax(0, 1fr) var(--chat-w);
+}
+.app.rail-closed.chat-closed {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+.app.rail-closed .rail {
+  /* keep the grid item (display:none would shift the center into the 0-width first track) */
+  visibility: hidden;
+  overflow: hidden;
+  border: 0;
+}
+.app.rail-closed .resizer.at-left {
+  display: none;
+}
 
 /* pane resize handles: an 8px strip over the pane border, highlighted on hover/drag */
 .resizer {

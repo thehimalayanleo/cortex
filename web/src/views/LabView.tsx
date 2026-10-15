@@ -107,6 +107,10 @@ export function LabView({ station, runId, plan, terminal, studio, arm, post, tra
             )}
           </div>
         </div>
+        <div className="lab-panes">
+          <button className="btn sm" onClick={() => emitCommand("toggle-rail")} title="Show or hide the papers list">Papers</button>
+          <button className="btn sm" onClick={() => emitCommand("toggle-chat")} title="Show or hide the chat">Chat</button>
+        </div>
         <details className="lab-howto">
           <summary className="muted small" title="How to use the lab">?</summary>
           <ol>

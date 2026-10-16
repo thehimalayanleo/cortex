@@ -44,10 +44,19 @@ MODELS = [
 FITS = {"sft": [(2, 1024), (1, 1024), (1, 512)], "grpo": [(2, 768), (1, 768), (1, 512)]}
 
 
+_mod: dict[str, Any] = {}
+
+
 def _mlx_post():
-    spec = importlib.util.spec_from_file_location("mlx_post", runs.RECIPES / "mlx_post.py")
+    """lab/recipes/mlx_post.py as a module, loaded again only when the file changes."""
+    path = runs.RECIPES / "mlx_post.py"
+    mt = path.stat().st_mtime
+    if _mod.get("mtime") == mt:
+        return _mod["m"]
+    spec = importlib.util.spec_from_file_location("mlx_post", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    _mod.update(m=mod, mtime=mt)
     return mod
 
 

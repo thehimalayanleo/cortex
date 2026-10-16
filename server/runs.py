@@ -373,8 +373,10 @@ def _detached(cmd: list[str], rid: str) -> list[str]:
     remote = cmd[-1]
     inner = f"{remote}; echo __EXIT__ $?"
     job = (f"mkdir -p ~/cortex-lab/out/runs && cd ~/cortex-lab && : > out/runs/{rid}.log && "  # create the log first: tail must not race the job
-           f"setsid nohup bash -c {shlex.quote(inner)} > out/runs/{rid}.log 2>&1 < /dev/null & "
-           f"P=$!; echo __PID__ $P; tail -n +1 -f --pid=$P ~/cortex-lab/out/runs/{rid}.log")
+           # start it from a subshell that exits at once, so init adopts and reaps the job; if the shell started it,
+           # tail (exec'd in the shell's place) became its parent, never reaped it, and --pid waited on a zombie
+           f"P=$( (setsid nohup bash -c {shlex.quote(inner)} > out/runs/{rid}.log 2>&1 < /dev/null & echo $!) ); "
+           f"echo __PID__ $P; tail -n +1 -f --pid=$P ~/cortex-lab/out/runs/{rid}.log")
     return [*cmd[:-1], job]
 
 
@@ -386,9 +388,10 @@ def _consume(proc: subprocess.Popen, d: Path, meta: dict, log, metrics) -> int |
             meta["remote_pid"] = int(line.split()[1])
             _write_meta(d, meta)
             continue
-        if line.startswith("__EXIT__ "):
+        if line.startswith("__EXIT__ "):  # the job printed its last line: stop following, whatever tail does
             remote_exit = int(line.split()[1])
-            continue
+            proc.terminate()
+            break
         if True:
             log.write(line)
             s = line.strip()

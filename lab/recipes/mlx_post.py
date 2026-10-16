@@ -45,7 +45,17 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 GEN_TOKENS = {"arm": 700, "gsm8k": 320, "code": 300}
 
 
+_CFG: dict = {}
+
+
 def model_config(model: str) -> dict:
+    """config.json for an MLX model id, kept in memory after the first read."""
+    if model not in _CFG:
+        _CFG[model] = _model_config(model)
+    return _CFG[model]
+
+
+def _model_config(model: str) -> dict:
     """config.json for an MLX model id: the local HF cache, else a small download kept in ~/Cortex/mlx/configs."""
     snap = Path.home() / ".cache" / "huggingface" / "hub" / f"models--{model.replace('/', '--')}" / "snapshots"
     for c in sorted(snap.glob("*/config.json")) if snap.exists() else []:
